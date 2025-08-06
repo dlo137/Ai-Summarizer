@@ -81,12 +81,27 @@ async function whisperTranscribe(videoUrl: string): Promise<string | null> {
     for await (const chunk of audioStream) chunks.push(chunk);
     const audioBuffer = Buffer.concat(chunks);
 
+    // Write buffer to a temp file and use fs.createReadStream
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const tempDir = os.tmpdir();
+    const tempFilePath = path.join(tempDir, `youtube-audio-${Date.now()}.mp3`);
+    await fs.promises.writeFile(tempFilePath, audioBuffer);
+    const audioReadStream = fs.createReadStream(tempFilePath);
+
     // Send to OpenAI Whisper
     const translation = await openai.audio.translations.create({
-      file: audioBuffer,
+      file: audioReadStream,
       model: 'whisper-1',
       response_format: 'text',
     });
+
+    // Clean up temp file
+    audioReadStream.on('close', () => {
+      fs.promises.unlink(tempFilePath).catch(() => {});
+    });
+
     return typeof translation === 'string' ? translation : null;
   } catch (err) {
     console.error('Whisper transcription error:', err);
