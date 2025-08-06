@@ -28,17 +28,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Find caption tracks
     const captionTracks = info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
     if (!captionTracks || captionTracks.length === 0) {
-      return res.status(404).json({ error: 'No captions available for this video' });
+      // Fallback: Use Whisper if no captions
+      const transcript = await whisperTranscribe(videoUrl);
+      if (!transcript) {
+        return res.status(404).json({ error: 'No captions or transcript available for this video' });
+      }
+      return res.status(200).json({ transcript, title, duration });
     }
 
     // Prefer English captions, fallback to first available
     const track = captionTracks.find((t: any) => t.languageCode.startsWith('en')) || captionTracks[0];
     if (!track?.baseUrl) {
-      return res.status(404).json({ error: 'No valid caption track found' });
+      // Fallback: Use Whisper if no valid caption track
+      const transcript = await whisperTranscribe(videoUrl);
+      if (!transcript) {
+        return res.status(404).json({ error: 'No captions or transcript available for this video' });
+      }
+      return res.status(200).json({ transcript, title, duration });
     }
 
     // Fetch the caption XML
     const captionRes = await fetch(track.baseUrl);
+    if (captionRes.status === 410) {
+      // Fallback: Use Whisper if captions endpoint returns 410
+      const transcript = await whisperTranscribe(videoUrl);
+      if (!transcript) {
+        return res.status(404).json({ error: 'No captions or transcript available for this video' });
+      }
+      return res.status(200).json({ transcript, title, duration });
+    }
     const captionXml = await captionRes.text();
 
     // Parse XML to plain text
@@ -48,6 +66,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error: any) {
     console.error('YouTube caption extraction error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+}
+
+// Whisper fallback function
+import OpenAI from 'openai';
+const openai = new OpenAI({ apiKey: process.env.OPENAI_SECRET_KEY });
+
+async function whisperTranscribe(videoUrl: string): Promise<string | null> {
+  try {
+    // Download audio from YouTube
+    const audioStream = ytdl(videoUrl, { filter: 'audioonly' });
+    const chunks: Buffer[] = [];
+    for await (const chunk of audioStream) chunks.push(chunk);
+    const audioBuffer = Buffer.concat(chunks);
+
+    // Send to OpenAI Whisper
+    const translation = await openai.audio.translations.create({
+      file: audioBuffer,
+      model: 'whisper-1',
+      response_format: 'text',
+    });
+    return typeof translation === 'string' ? translation : null;
+  } catch (err) {
+    console.error('Whisper transcription error:', err);
+    return null;
   }
 }
 
