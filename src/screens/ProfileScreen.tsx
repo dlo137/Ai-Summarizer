@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,94 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { handleLogout } from '../utils/onboardingState';
+import { supabase } from '../lib/supabase';
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
+  const [userDisplayName, setUserDisplayName] = useState('User');
+  const [userEmail, setUserEmail] = useState('');
+
+  // Function to format display name (First name + Last initial)
+  const formatDisplayName = (fullName: string): string => {
+    if (!fullName || fullName.trim() === '') return 'User';
+    
+    const nameParts = fullName.trim().split(' ');
+    if (nameParts.length === 1) {
+      // Only first name provided
+      return nameParts[0];
+    } else if (nameParts.length >= 2) {
+      // First name + last initial
+      const firstName = nameParts[0];
+      const lastInitial = nameParts[nameParts.length - 1].charAt(0).toUpperCase();
+      return `${firstName} ${lastInitial}.`;
+    }
+    
+    return fullName;
+  };
+
+  // Fetch user data on component mount
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        if (error) {
+          console.error('Error fetching user:', error);
+          return;
+        }
+
+        if (user) {
+          setUserEmail(user.email || '');
+          
+          // Try to get user's full name from user metadata or profile
+          let fullName = '';
+          
+          // Check user metadata first (from auth providers like Google)
+          if (user.user_metadata?.full_name) {
+            fullName = user.user_metadata.full_name;
+          } else if (user.user_metadata?.name) {
+            fullName = user.user_metadata.name;
+          } else if (user.user_metadata?.first_name && user.user_metadata?.last_name) {
+            fullName = `${user.user_metadata.first_name} ${user.user_metadata.last_name}`;
+          }
+          
+          // If no metadata, try to get from profiles table
+          if (!fullName) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('full_name, first_name, last_name')
+              .eq('id', user.id)
+              .single();
+            
+            if (profile) {
+              if (profile.full_name) {
+                fullName = profile.full_name;
+              } else if (profile.first_name && profile.last_name) {
+                fullName = `${profile.first_name} ${profile.last_name}`;
+              } else if (profile.first_name) {
+                fullName = profile.first_name;
+              }
+            }
+          }
+          
+          // Format and set display name
+          const displayName = formatDisplayName(fullName);
+          setUserDisplayName(displayName);
+          
+          console.log('User data loaded:', {
+            email: user.email,
+            fullName,
+            displayName,
+            metadata: user.user_metadata
+          });
+        }
+      } catch (error) {
+        console.error('Error in fetchUserData:', error);
+      }
+    };
+
+    fetchUserData();
+  }, []);
   const profileOptions = [
     {
       title: 'Account Settings',
@@ -55,8 +140,8 @@ const ProfileScreen = () => {
           <View style={styles.avatar}>
             <Ionicons name="person" size={40} color="#007AFF" />
           </View>
-          <Text style={styles.userName}>User Name</Text>
-          <Text style={styles.userEmail}>user@example.com</Text>
+          <Text style={styles.userName}>{userDisplayName}</Text>
+          <Text style={styles.userEmail}>{userEmail || 'user@example.com'}</Text>
           <View style={styles.subscriptionBadge}>
             <Text style={styles.subscriptionText}>Free Plan</Text>
           </View>

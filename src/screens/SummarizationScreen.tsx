@@ -12,6 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { saveSummaryRecord } from '../lib/summaryService';
+import { updateDocumentStatus } from '../lib/documentService';
 
 type RootStackParamList = {
   HomeScreen: undefined;
@@ -126,6 +128,27 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
         // Step 3: Extract key points
         const points = extractKeyPoints(summaryResult);
         
+        // Step 4: Save summary to database
+        try {
+          console.log('💾 Saving summary to database for document:', documentId);
+          await saveSummaryRecord(documentId, summaryResult, points);
+          console.log('✅ Summary saved successfully');
+          
+          // Update document status to 'summarized'
+          console.log('📝 Updating document status...');
+          await updateDocumentStatus(documentId, 'summarized', summaryResult);
+          console.log('✅ Document status updated');
+        } catch (saveError) {
+          console.error('⚠️ Failed to save summary:', saveError);
+          console.error('Save error details:', {
+            documentId,
+            summaryLength: summaryResult.length,
+            keyPointsCount: points.length,
+            error: saveError
+          });
+          // Don't throw error here - we still want to show the summary even if save fails
+        }
+        
         // Update state
         setSummary(summaryResult);
         setKeyPoints(points);
@@ -158,6 +181,17 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
         const extractedText = await extractTextFromPDF(publicUrl);
         const summaryResult = await summarizeText(extractedText);
         const points = extractKeyPoints(summaryResult || '');
+        
+        // Save summary to database
+        if (summaryResult) {
+          try {
+            await saveSummaryRecord(documentId, summaryResult, points);
+            await updateDocumentStatus(documentId, 'summarized', summaryResult);
+            console.log('✅ Summary saved successfully on retry');
+          } catch (saveError) {
+            console.error('⚠️ Failed to save summary on retry:', saveError);
+          }
+        }
         
         setSummary(summaryResult || '');
         setKeyPoints(points);

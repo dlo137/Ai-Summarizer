@@ -17,6 +17,8 @@ export interface Summary {
   wordCount: number;
   createdAt: Date;
   updatedAt: Date;
+  documentTitle?: string; // From joined documents table
+  documentType?: string; // From joined documents table
 }
 
 export interface User {

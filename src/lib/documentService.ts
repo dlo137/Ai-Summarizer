@@ -51,6 +51,28 @@ export async function getUserDocuments(): Promise<DocumentRow[]> {
   return data || [];
 }
 
+export async function updateDocumentStatus(
+  documentId: string, 
+  status: DocumentRow['status'], 
+  summary?: string
+): Promise<void> {
+  const user = await supabase.auth.getUser();
+  if (!user.data.user) throw new Error('Not authenticated');
+
+  const updateData: Partial<DocumentRow> = { status };
+  if (summary) {
+    updateData.summary = summary;
+  }
+
+  const { error } = await supabase
+    .from('documents')
+    .update(updateData)
+    .eq('id', documentId)
+    .eq('user_id', user.data.user.id);
+
+  if (error) throw error;
+}
+
 export function subscribeToUserDocuments(
   callback: (documents: DocumentRow[]) => void
 ) {
