@@ -9,6 +9,7 @@ import {
   TextInput,
   Alert,
   Modal,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -25,6 +26,9 @@ const HomeScreen = () => {
   const [url, setUrl] = React.useState('');
   const [youtubeUrl, setYoutubeUrl] = React.useState('');
   const [showYoutubeModal, setShowYoutubeModal] = React.useState(false);
+  const [showPdfModal, setShowPdfModal] = React.useState(false);
+  const [pdfProgress, setPdfProgress] = React.useState(0);
+  const progressAnim = React.useRef(new Animated.Value(0)).current;
 
   const handleYoutubeUrl = () => {
     if (!youtubeUrl.trim()) {
@@ -62,18 +66,58 @@ const HomeScreen = () => {
     setUrl('');
   };
 
+  const simulatePdfConversion = () => {
+    setShowPdfModal(true);
+    setPdfProgress(0);
+    progressAnim.setValue(0);
+
+    // Simulate progress over 3 seconds
+    const duration = 3000;
+    const interval = 50;
+    const steps = duration / interval;
+    let currentStep = 0;
+
+    const timer = setInterval(() => {
+      currentStep++;
+      const progress = (currentStep / steps) * 100;
+      setPdfProgress(Math.round(progress));
+      
+      Animated.timing(progressAnim, {
+        toValue: progress,
+        duration: interval,
+        useNativeDriver: false,
+      }).start();
+
+      if (currentStep >= steps) {
+        clearInterval(timer);
+        setTimeout(() => {
+          setShowPdfModal(false);
+          Alert.alert('Success', 'File downloaded successfully!');
+          setPdfProgress(0);
+          progressAnim.setValue(0);
+        }, 200);
+      }
+    }, interval);
+  };
+
   const pickPDF = async () => {
     try {
+      // First, let user select the PDF file
       const result = await handlePdfUpload();
+      
       if (result) {
+        // File selected successfully, now show progress simulation
         console.log('Document record created:', {
           id: result.docRow.id,
           publicUrl: result.publicUrl,
           name: result.fileName
         });
-        Alert.alert('Success', 'PDF uploaded and saved successfully!');
+        
+        // Start the visual conversion process after file selection
+        simulatePdfConversion();
       }
     } catch (err) {
+      setShowPdfModal(false);
       Alert.alert('Error', err instanceof Error ? err.message : 'Failed to process PDF');
       console.error(err);
     }
@@ -235,6 +279,42 @@ const HomeScreen = () => {
               >
                 <Text style={styles.modalButtonText}>Summarize</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* PDF Progress Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showPdfModal}
+        onRequestClose={() => {}}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.progressHeader}>
+              <Ionicons name="document-text" size={32} color="#007AFF" />
+              <Text style={styles.modalTitle}>Processing PDF</Text>
+            </View>
+            <Text style={styles.progressSubtitle}>Converting your document...</Text>
+            
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBarBackground}>
+                <Animated.View 
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: progressAnim.interpolate({
+                        inputRange: [0, 100],
+                        outputRange: ['0%', '100%'],
+                        extrapolate: 'clamp',
+                      }),
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.progressText}>{pdfProgress}%</Text>
             </View>
           </View>
         </View>
@@ -433,6 +513,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     textAlign: 'center',
+  },
+  progressHeader: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  progressSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  progressContainer: {
+    alignItems: 'center',
+  },
+  progressBarBackground: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#e1e1e1',
+    borderRadius: 4,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#007AFF',
   },
 });
 

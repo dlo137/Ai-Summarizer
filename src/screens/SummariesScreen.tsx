@@ -59,13 +59,6 @@ const SummariesScreen = () => {
       <Text style={styles.emptySubtitle}>
         Create your first summary by adding a document
       </Text>
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={() => navigation.navigate('AddDocument' as never)}
-      >
-        <Ionicons name="add" size={20} color="white" />
-        <Text style={styles.addButtonText}>Add Document</Text>
-      </TouchableOpacity>
     </View>
   );
 
