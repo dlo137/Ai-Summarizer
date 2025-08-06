@@ -28,12 +28,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err: any) {
       if (err?.statusCode === 410) {
         console.warn('[DEBUG] ytdl.getInfo returned 410, falling back to Whisper');
-        const transcript = await whisperTranscribe(videoUrl);
-        if (!transcript) {
-          console.error('[DEBUG] Whisper fallback failed, no transcript');
-          return res.status(404).json({ error: 'No captions or transcript available for this video' });
+        try {
+          const transcript = await whisperTranscribe(videoUrl);
+          if (!transcript) {
+            console.error('[DEBUG] Whisper fallback failed, no transcript');
+            return res.status(404).json({ error: 'Sorry, we can’t extract audio or captions for this video.' });
+          }
+          return res.status(200).json({ transcript, title: '', duration: 0 });
+        } catch (audioErr: any) {
+          console.error('[DEBUG] Whisper fallback failed:', audioErr);
+          return res.status(404).json({ error: 'Sorry, we can’t extract audio or captions for this video.' });
         }
-        return res.status(200).json({ transcript, title: '', duration: 0 });
       }
       console.error('[DEBUG] ytdl.getInfo error:', err);
       return res.status(500).json({ error: err.message || 'Internal server error' });
@@ -117,10 +122,39 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_SECRET_KEY });
 
 async function whisperTranscribe(videoUrl: string): Promise<string | null> {
   try {
-    // Download audio from YouTube
-    const audioStream = ytdl(videoUrl, { filter: 'audioonly' });
+    // Always get fresh info before downloading audio to avoid expired URLs (410)
+    let info;
+    try {
+      info = await ytdl.getInfo(videoUrl);
+    } catch (err: any) {
+      if (err?.statusCode === 410) {
+        console.warn('[DEBUG] ytdl.getInfo for audio returned 410');
+        throw new Error('Audio stream unavailable—cannot transcribe this video.');
+      }
+      throw err;
+    }
+
+    let audioStream;
+    try {
+      audioStream = ytdl.downloadFromInfo(info, { filter: 'audioonly' });
+    } catch (err: any) {
+      if (err?.statusCode === 410) {
+        console.warn('[DEBUG] ytdl.downloadFromInfo returned 410');
+        throw new Error('Audio stream unavailable—cannot transcribe this video.');
+      }
+      throw err;
+    }
+
     const chunks: Buffer[] = [];
-    for await (const chunk of audioStream) chunks.push(chunk);
+    try {
+      for await (const chunk of audioStream) chunks.push(chunk);
+    } catch (err: any) {
+      if (err?.statusCode === 410) {
+        console.warn('[DEBUG] Audio stream fetch returned 410');
+        throw new Error('Audio stream unavailable—cannot transcribe this video.');
+      }
+      throw err;
+    }
     const audioBuffer = Buffer.concat(chunks);
 
     // Write buffer to a temp file and use fs.createReadStream
@@ -145,7 +179,12 @@ async function whisperTranscribe(videoUrl: string): Promise<string | null> {
     });
 
     return typeof translation === 'string' ? translation : null;
-  } catch (err) {
+  } catch (err: any) {
+    // If we get a 410 or custom error, log and return null for final fallback
+    if (err?.message?.includes('Audio stream unavailable')) {
+      console.error('[DEBUG] Whisper fallback failed: audio stream unavailable (410)');
+      return null;
+    }
     console.error('Whisper transcription error:', err);
     return null;
   }
