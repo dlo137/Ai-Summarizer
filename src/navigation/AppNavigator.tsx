@@ -6,7 +6,6 @@ import HomeScreen from '../screens/HomeScreen';
 import DocumentsScreen from '../screens/DocumentsScreen';
 import DocumentDetailScreen from '../screens/DocumentDetailScreen';
 import SummariesScreen from '../screens/SummariesScreen';
-import SummaryDetailScreen from '../screens/SummaryDetailScreen';
 import SummarizationScreen from '../screens/SummarizationScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AddDocumentScreen from '../screens/AddDocumentScreen';
@@ -76,7 +75,7 @@ const SummariesStack = () => (
     }}
   >
     <Stack.Screen name="SummariesScreen" component={SummariesScreen} options={{ title: 'My Summaries' }} />
-    <Stack.Screen name="SummaryDetail" component={SummaryDetailScreen} options={{ title: 'Summary Details' }} />
+    <Stack.Screen name="Summarization" component={SummarizationScreen} options={{ title: 'Summary Details' }} />
   </Stack.Navigator>
 );
 

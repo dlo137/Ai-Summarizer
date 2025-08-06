@@ -15,7 +15,7 @@ import { Document } from '../types';
 const DocumentDetailScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const document = route.params?.document as Document;
+  const document = (route.params as any)?.document as Document;
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
   const generateSummary = async () => {

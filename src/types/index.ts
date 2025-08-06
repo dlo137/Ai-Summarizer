@@ -19,6 +19,9 @@ export interface Summary {
   updatedAt: Date;
   documentTitle?: string; // From joined documents table
   documentType?: string; // From joined documents table
+  overview?: string[];
+  sections?: { title: string; bullets: string[] }[];
+  chatOptions?: string[];
 }
 
 export interface User {

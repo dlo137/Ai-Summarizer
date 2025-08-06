@@ -18,7 +18,12 @@ import { getUserSummaries, subscribeToUserSummaries, SummaryRow } from '../lib/s
 type RootStackParamList = {
   Home: undefined;
   Summaries: undefined;
-  SummaryDetail: { summary: Summary };
+  Summarization: { 
+    documentId: string;
+    fileName: string;
+    publicUrl?: string;
+    summary?: Summary;
+  };
 };
 
 const SummariesScreen = () => {
@@ -89,7 +94,12 @@ const SummariesScreen = () => {
     return (
       <TouchableOpacity
         style={styles.summaryCard}
-        onPress={() => navigation.navigate('SummaryDetail', { summary })}
+        onPress={() => navigation.navigate('Summarization', { 
+          documentId: summary.documentId,
+          fileName: summary.documentTitle || 'Summary',
+          publicUrl: '',
+          summary: summary
+        })}
       >
         <View style={styles.summaryHeader}>
           <View style={styles.summaryIcon}>

@@ -8,19 +8,23 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  TextInput,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { saveSummaryRecord } from '../lib/summaryService';
 import { updateDocumentStatus } from '../lib/documentService';
+import { Summary } from '../types';
 
 type RootStackParamList = {
   HomeScreen: undefined;
   Summarization: {
     documentId: string;
     fileName: string;
-    publicUrl: string;
+    publicUrl?: string;
+    summary?: Summary;
   };
   Summaries: undefined;
 };
@@ -32,12 +36,19 @@ const SummarizationScreen = () => {
   const navigation = useNavigation<SummarizationScreenNavigationProp>();
   const route = useRoute<SummarizationScreenRouteProp>();
   
-  const { documentId, fileName, publicUrl } = route.params;
+  const { documentId, fileName, publicUrl, summary: existingSummary } = route.params;
   
   const [summary, setSummary] = useState<string>('');
   const [keyPoints, setKeyPoints] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [activeTab, setActiveTab] = useState<'Summary' | 'PDF' | 'Chat'>('Summary');
+  const [chatInput, setChatInput] = useState('');
+  const [structuredSummary, setStructuredSummary] = useState<{
+    overview: string[];
+    sections: { title: string; bullets: string[] }[];
+    chatOptions: string[];
+  } | null>(null);
 
   // Function to summarize text using OpenAI API
   const summarizeText = async (text: string) => {
@@ -98,8 +109,86 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
     return sentences.slice(0, 3).map(s => s.trim());
   };
 
+  // Function to parse summary into structured format
+  const parseStructuredSummary = (summaryText: string) => {
+    // Mock structured data - in production, you'd enhance the AI to return structured data
+    const overview = [
+      "This document outlines the key responsibilities and requirements for an office automation clerk role.",
+      "The position involves managing digital documents, data entry, and administrative support tasks.",
+      "Strong computer skills and attention to detail are essential for success in this role."
+    ];
+
+    const sections = [
+      {
+        title: "Position Purpose and Scope",
+        bullets: [
+          "Perform data entry and document management tasks using office automation software",
+          "Support various departments with administrative and clerical functions",
+          "Maintain accurate records and ensure data integrity across systems"
+        ]
+      },
+      {
+        title: "Key Responsibilities",
+        bullets: [
+          "Process and organize digital documents and files",
+          "Enter data into databases and spreadsheet applications",
+          "Generate reports and correspondence using word processing software",
+          "Maintain filing systems and document version control"
+        ]
+      },
+      {
+        title: "Required Qualifications",
+        bullets: [
+          "High school diploma or equivalent required",
+          "Proficiency in Microsoft Office Suite (Word, Excel, PowerPoint)",
+          "Strong typing skills with accuracy and speed",
+          "Excellent organizational and time management abilities"
+        ]
+      }
+    ];
+
+    const chatOptions = [
+      "Key points in the document",
+      "Main responsibilities",
+      "Draft a job application email"
+    ];
+
+    return { overview, sections, chatOptions };
+  };
+
   // Process the document when component mounts
   useEffect(() => {
+    // If we have an existing summary, just display it
+    if (existingSummary) {
+      setSummary(existingSummary.content);
+      setKeyPoints(existingSummary.keyPoints);
+      
+      // Set structured summary from existing data or parse it
+      if (existingSummary.overview && existingSummary.sections) {
+        setStructuredSummary({
+          overview: existingSummary.overview,
+          sections: existingSummary.sections,
+          chatOptions: existingSummary.chatOptions || ["Key points in the document", "Main responsibilities", "Draft a job application email"]
+        });
+      } else {
+        // Parse the existing summary into structured format
+        const structured = parseStructuredSummary(existingSummary.content);
+        setStructuredSummary(structured);
+      }
+      return;
+    }
+
+    // If we don't have an existing summary, process the document
+    if (!publicUrl) {
+      setHasError(true);
+      Alert.alert(
+        'Error',
+        'Document URL is missing. Cannot process the document.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     const processDocument = async () => {
       setIsLoading(true);
       setHasError(false);
@@ -108,7 +197,7 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
         console.log('🚀 Starting document processing...');
         
         // Step 1: Extract text from PDF
-        const extractedText = await extractTextFromPDF(publicUrl);
+        const extractedText = await extractTextFromPDF(publicUrl!);
         
         if (!extractedText) {
           throw new Error('Failed to extract text from PDF');
@@ -125,8 +214,9 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
 
         console.log('✅ Summarization completed');
 
-        // Step 3: Extract key points
+        // Step 3: Extract key points and parse structured summary
         const points = extractKeyPoints(summaryResult);
+        const structured = parseStructuredSummary(summaryResult);
         
         // Step 4: Save summary to database
         try {
@@ -152,6 +242,7 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
         // Update state
         setSummary(summaryResult);
         setKeyPoints(points);
+        setStructuredSummary(structured);
         
         console.log('✅ Processing completed successfully');
         
@@ -169,18 +260,29 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
     };
 
     processDocument();
-  }, [documentId, publicUrl, fileName]);
+  }, [documentId, publicUrl, fileName, existingSummary]);
 
   const handleRetry = () => {
+    // Check if we have publicUrl before retrying
+    if (!publicUrl) {
+      Alert.alert(
+        'Error',
+        'Document URL is missing. Cannot retry processing.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     // Retry processing
     const processDocument = async () => {
       setIsLoading(true);
       setHasError(false);
       
       try {
-        const extractedText = await extractTextFromPDF(publicUrl);
+        const extractedText = await extractTextFromPDF(publicUrl!);
         const summaryResult = await summarizeText(extractedText);
         const points = extractKeyPoints(summaryResult || '');
+        const structured = parseStructuredSummary(summaryResult || '');
         
         // Save summary to database
         if (summaryResult) {
@@ -195,6 +297,7 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
         
         setSummary(summaryResult || '');
         setKeyPoints(points);
+        setStructuredSummary(structured);
         
       } catch (error) {
         console.error('Error processing document:', error);
@@ -216,6 +319,135 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
     navigation.getParent()?.navigate('Summaries');
   };
 
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'Summary':
+        return renderSummaryTab();
+      case 'PDF':
+        return renderPDFTab();
+      case 'Chat':
+        return renderChatTab();
+      default:
+        return renderSummaryTab();
+    }
+  };
+
+  const renderSummaryTab = () => {
+    if (isLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Generating summary...</Text>
+        </View>
+      );
+    }
+
+    if (hasError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={32} color="#FF3B30" />
+          <Text style={styles.errorText}>Failed to generate summary</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (!structuredSummary) {
+      return (
+        <View style={styles.placeholderContainer}>
+          <Text style={styles.placeholderText}>
+            Summary will appear here once processing is complete.
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView style={styles.summaryContent} showsVerticalScrollIndicator={false}>
+        {/* Overview Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>Overview</Text>
+          {structuredSummary.overview.map((bullet, index) => (
+            <View key={index} style={styles.bulletPoint}>
+              <View style={styles.bullet} />
+              <Text style={styles.bulletText}>{bullet}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Dynamic Sections */}
+        {structuredSummary.sections.map((section, sectionIndex) => (
+          <View key={sectionIndex} style={styles.section}>
+            <Text style={styles.sectionHeader}>{section.title}</Text>
+            {section.bullets.map((bullet, bulletIndex) => (
+              <View key={bulletIndex} style={styles.bulletPoint}>
+                <View style={styles.bullet} />
+                <Text style={styles.bulletText}>{bullet}</Text>
+              </View>
+            ))}
+          </View>
+        ))}
+      </ScrollView>
+    );
+  };
+
+  const renderPDFTab = () => {
+    return (
+      <View style={styles.pdfContainer}>
+        <View style={styles.pdfPlaceholder}>
+          <Ionicons name="document-text-outline" size={64} color="#ccc" />
+          <Text style={styles.pdfPlaceholderText}>PDF Viewer</Text>
+          <Text style={styles.pdfSubtext}>
+            PDF rendering will be implemented here
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderChatTab = () => {
+    return (
+      <View style={styles.chatContainer}>
+        <ScrollView style={styles.chatContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.welcomeMessage}>
+            <Text style={styles.welcomeText}>
+              Hello there! What can I answer about your pdf?
+            </Text>
+          </View>
+
+          <View style={styles.chatOptionsContainer}>
+            {structuredSummary?.chatOptions.map((option, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.chatOptionButton}
+                onPress={() => setChatInput(option)}
+              >
+                <Text style={styles.chatOptionText}>{option}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
+        <View style={styles.chatInputContainer}>
+          <View style={styles.chatInputWrapper}>
+            <TextInput
+              style={styles.chatInput}
+              value={chatInput}
+              onChangeText={setChatInput}
+              placeholder="Type your question here..."
+              multiline
+            />
+            <TouchableOpacity style={styles.micButton}>
+              <Ionicons name="mic" size={20} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -223,79 +455,44 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
         <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
           <Ionicons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
-        <Text style={styles.title}>Document Summary</Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.title}>{fileName.replace('.pdf', '')}</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.headerAction}>
+            <Ionicons name="heart-outline" size={24} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerAction}>
+            <Ionicons name="share-outline" size={24} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerAction}>
+            <Ionicons name="ellipsis-horizontal" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      {/* Segmented Control */}
+      <View style={styles.segmentedControl}>
+        {(['Summary', 'PDF', 'Chat'] as const).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[
+              styles.segmentButton,
+              activeTab === tab && styles.activeSegment
+            ]}
+            onPress={() => setActiveTab(tab)}
+          >
+            <Text style={[
+              styles.segmentText,
+              activeTab === tab && styles.activeSegmentText
+            ]}>
+              {tab}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-        {/* Summary Content */}
-        <View style={styles.contentSection}>
-          <Text style={styles.sectionTitle}>Summary</Text>
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.loadingText}>Generating summary...</Text>
-            </View>
-          ) : hasError ? (
-            <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={32} color="#FF3B30" />
-              <Text style={styles.errorText}>Failed to generate summary</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : summary ? (
-            <View style={styles.summaryContainer}>
-              <Text style={styles.summaryText}>{summary}</Text>
-            </View>
-          ) : (
-            <View style={styles.placeholderContainer}>
-              <Text style={styles.placeholderText}>
-                Summary will appear here once processing is complete.
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.contentSection}>
-          <Text style={styles.sectionTitle}>Key Points</Text>
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#007AFF" />
-              <Text style={styles.loadingText}>Extracting key points...</Text>
-            </View>
-          ) : hasError ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>Key points unavailable</Text>
-            </View>
-          ) : keyPoints.length > 0 ? (
-            <View style={styles.keyPointsContainer}>
-              {keyPoints.map((point, index) => (
-                <View key={index} style={styles.keyPointItem}>
-                  <View style={styles.keyPointBullet} />
-                  <Text style={styles.keyPointText}>{point}</Text>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.placeholderContainer}>
-              <Text style={styles.placeholderText}>
-                Key points will be extracted from the summary.
-              </Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
-
-      {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={handleBackPress}>
-          <Text style={styles.secondaryButtonText}>Back to Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.primaryButton} onPress={handleViewSummaries}>
-          <Text style={styles.primaryButtonText}>View All Summaries</Text>
-        </TouchableOpacity>
+      {/* Tab Content */}
+      <View style={styles.tabContent}>
+        {renderTabContent()}
       </View>
     </SafeAreaView>
   );
@@ -312,24 +509,124 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     paddingBottom: 10,
+    backgroundColor: 'white',
   },
   backButton: {
     padding: 8,
   },
   title: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '600',
     color: '#1a1a1a',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 10,
   },
-  placeholder: {
-    width: 40, // Same width as back button for centering
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  scrollContent: {
+  headerAction: {
+    padding: 8,
+  },
+  segmentedControl: {
+    flexDirection: 'row',
+    backgroundColor: '#f0f0f0',
+    margin: 20,
+    borderRadius: 8,
+    padding: 4,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  activeSegment: {
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  segmentText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  activeSegmentText: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  tabContent: {
+    flex: 1,
+  },
+  summaryContent: {
+    flex: 1,
     padding: 20,
   },
-  documentInfo: {
+  section: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 12,
+  },
+  bulletPoint: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  bullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#007AFF',
+    marginTop: 6,
+    marginRight: 12,
+  },
+  bulletText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1a1a1a',
+    lineHeight: 20,
+  },
+  pdfContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
+  },
+  pdfPlaceholder: {
+    alignItems: 'center',
+  },
+  pdfPlaceholderText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginTop: 16,
+  },
+  pdfSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  chatContainer: {
+    flex: 1,
+  },
+  chatContent: {
+    flex: 1,
+    padding: 20,
+  },
+  welcomeMessage: {
     backgroundColor: 'white',
     borderRadius: 12,
     padding: 20,
@@ -343,73 +640,18 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  documentIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#f0f8ff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  documentDetails: {
-    flex: 1,
-  },
-  documentTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 5,
-  },
-  contentSection: {
-    marginBottom: 25,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 10,
-  },
-  placeholderText: {
+  welcomeText: {
     fontSize: 16,
-    color: '#666',
+    color: '#1a1a1a',
     textAlign: 'center',
-    fontStyle: 'italic',
   },
-  actionButtons: {
-    flexDirection: 'row',
-    padding: 20,
-    gap: 10,
+  chatOptionsContainer: {
+    gap: 12,
   },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: '#f0f0f0',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  secondaryButtonText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  primaryButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  primaryButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadingContainer: {
+  chatOptionButton: {
     backgroundColor: 'white',
     borderRadius: 12,
-    padding: 30,
-    alignItems: 'center',
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -418,6 +660,41 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  chatOptionText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  chatInputContainer: {
+    padding: 20,
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  chatInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  chatInput: {
+    flex: 1,
+    maxHeight: 100,
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  micButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
     fontSize: 16,
@@ -425,18 +702,10 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   errorContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 30,
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    padding: 40,
   },
   errorText: {
     fontSize: 16,
@@ -456,69 +725,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  summaryContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  summaryText: {
-    fontSize: 16,
-    color: '#1a1a1a',
-    lineHeight: 24,
-  },
   placeholderContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 30,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  keyPointsContainer: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  keyPointItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  keyPointBullet: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#007AFF',
-    marginTop: 8,
-    marginRight: 12,
-  },
-  keyPointText: {
     flex: 1,
-    fontSize: 14,
-    color: '#1a1a1a',
-    lineHeight: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  placeholderText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
 
