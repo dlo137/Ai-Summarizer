@@ -165,6 +165,19 @@ export async function deleteSummary(summaryId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function deleteSummaryByDocumentId(documentId: string): Promise<void> {
+  const user = await supabase.auth.getUser();
+  if (!user.data.user) throw new Error('Not authenticated');
+
+  const { error } = await supabase
+    .from('summaries')
+    .delete()
+    .eq('document_id', documentId)
+    .eq('user_id', user.data.user.id);
+
+  if (error) throw error;
+}
+
 // Debug function to test database connection
 export async function testSummariesTable(): Promise<void> {
   try {

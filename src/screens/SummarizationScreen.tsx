@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { saveSummaryRecord } from '../lib/summaryService';
+import { saveSummaryRecord, deleteSummaryByDocumentId } from '../lib/summaryService';
 import { updateDocumentStatus } from '../lib/documentService';
 import { Summary } from '../types';
 
@@ -49,6 +49,16 @@ const SummarizationScreen = () => {
     sections: { title: string; bullets: string[] }[];
     chatOptions: string[];
   } | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editedSummary, setEditedSummary] = useState('');
+  const [chatMessages, setChatMessages] = useState<Array<{
+    id: string;
+    text: string;
+    isUser: boolean;
+    timestamp: Date;
+  }>>([]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [documentText, setDocumentText] = useState<string>('');
 
   // Function to summarize text using OpenAI API
   const summarizeText = async (text: string) => {
@@ -100,6 +110,49 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
     console.log('📄 Total text length:', sampleText.length);
     
     return sampleText;
+  };
+
+  // Function to handle chat with document context
+  const chatWithDocument = async (question: string) => {
+    try {
+      console.log('💬 Sending chat question to OpenAI API');
+      
+      const contextualPrompt = `Based on the following document content, please answer the user's question:
+
+Document Content:
+${documentText || summary}
+
+User Question: ${question}
+
+Please provide a helpful and accurate answer based only on the information in the document. If the information is not available in the document, please say so.`;
+
+      const res = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: contextualPrompt }),
+      });
+      
+      console.log('📥 Chat API Response status:', res.status);
+      
+      if (!res.ok) {
+        let errorDetails = '';
+        try {
+          const errorData = await res.json();
+          errorDetails = errorData.error || 'Unknown error';
+          console.log('❌ Chat API Error details:', errorData);
+        } catch (e) {
+          console.log('❌ Could not parse chat error response');
+        }
+        throw new Error(`HTTP error! status: ${res.status}, details: ${errorDetails}`);
+      }
+      
+      const data = await res.json();
+      console.log('✅ Chat API Response received:', data);
+      return data.summary; // The API returns the response in the 'summary' field
+    } catch (err) {
+      console.error('❌ Error in chat:', err);
+      return null;
+    }
   };
 
   // Function to extract key points from summary
@@ -163,6 +216,9 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
       setSummary(existingSummary.content);
       setKeyPoints(existingSummary.keyPoints);
       
+      // For chat context, use the summary content if no original text is available
+      setDocumentText(existingSummary.content);
+      
       // Set structured summary from existing data or parse it
       if (existingSummary.overview && existingSummary.sections) {
         setStructuredSummary({
@@ -204,6 +260,9 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
         }
 
         console.log('✅ Text extraction completed');
+        
+        // Store the extracted text for chat context
+        setDocumentText(extractedText);
 
         // Step 2: Summarize the text
         const summaryResult = await summarizeText(extractedText);
@@ -319,6 +378,177 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
     navigation.getParent()?.navigate('Summaries');
   };
 
+  const handleRegenerateSummary = async () => {
+    Alert.alert(
+      'Regenerate Summary',
+      'Are you sure you want to regenerate the summary? This will replace the current summary.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Regenerate',
+          style: 'destructive',
+          onPress: async () => {
+            if (!publicUrl) {
+              Alert.alert('Error', 'Cannot regenerate summary without document URL.');
+              return;
+            }
+            
+            setIsLoading(true);
+            setHasError(false);
+            
+            try {
+              const extractedText = await extractTextFromPDF(publicUrl!);
+              const summaryResult = await summarizeText(extractedText);
+              const points = extractKeyPoints(summaryResult || '');
+              const structured = parseStructuredSummary(summaryResult || '');
+              
+              // Update summary in database
+              if (summaryResult) {
+                try {
+                  await saveSummaryRecord(documentId, summaryResult, points);
+                  await updateDocumentStatus(documentId, 'summarized', summaryResult);
+                } catch (saveError) {
+                  console.error('Failed to save regenerated summary:', saveError);
+                }
+              }
+              
+              setSummary(summaryResult || '');
+              setKeyPoints(points);
+              setStructuredSummary(structured);
+              
+              Alert.alert('Success', 'Summary has been regenerated successfully.');
+            } catch (error) {
+              console.error('Error regenerating summary:', error);
+              Alert.alert('Error', 'Failed to regenerate summary. Please try again.');
+            } finally {
+              setIsLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleEditSummary = () => {
+    setEditedSummary(summary);
+    setIsEditMode(true);
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      const points = extractKeyPoints(editedSummary);
+      const structured = parseStructuredSummary(editedSummary);
+      
+      // Update summary in database
+      await saveSummaryRecord(documentId, editedSummary, points);
+      await updateDocumentStatus(documentId, 'summarized', editedSummary);
+      
+      // Update local state
+      setSummary(editedSummary);
+      setKeyPoints(points);
+      setStructuredSummary(structured);
+      setIsEditMode(false);
+      
+      Alert.alert('Success', 'Summary has been updated successfully.');
+    } catch (error) {
+      console.error('Error saving edited summary:', error);
+      Alert.alert('Error', 'Failed to save changes. Please try again.');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditMode(false);
+    setEditedSummary('');
+  };
+
+  const handleDeleteSummary = () => {
+    Alert.alert(
+      'Delete Summary',
+      'Are you sure you want to delete this summary? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Delete the summary from the database
+              await deleteSummaryByDocumentId(documentId);
+              
+              // Update document status back to 'pending'
+              await updateDocumentStatus(documentId, 'pending', '');
+              
+              Alert.alert('Success', 'Summary has been deleted successfully.', [
+                { text: 'OK', onPress: () => navigation.goBack() }
+              ]);
+            } catch (error) {
+              console.error('Error deleting summary:', error);
+              Alert.alert('Error', 'Failed to delete summary. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleSendMessage = async (message: string) => {
+    if (!message.trim()) return;
+    
+    // Add user message
+    const userMessage = {
+      id: Date.now().toString() + '_user',
+      text: message.trim(),
+      isUser: true,
+      timestamp: new Date()
+    };
+    
+    setChatMessages(prev => [...prev, userMessage]);
+    setChatInput('');
+    setIsChatLoading(true);
+    
+    try {
+      // Get AI response
+      const aiResponse = await chatWithDocument(message.trim());
+      
+      if (aiResponse) {
+        const botMessage = {
+          id: Date.now().toString() + '_bot',
+          text: aiResponse,
+          isUser: false,
+          timestamp: new Date()
+        };
+        
+        setChatMessages(prev => [...prev, botMessage]);
+      } else {
+        const errorMessage = {
+          id: Date.now().toString() + '_error',
+          text: 'Sorry, I couldn\'t process your question. Please try again.',
+          isUser: false,
+          timestamp: new Date()
+        };
+        
+        setChatMessages(prev => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorMessage = {
+        id: Date.now().toString() + '_error',
+        text: 'Sorry, there was an error processing your question. Please try again.',
+        isUser: false,
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
+  const handleChatOptionPress = (option: string) => {
+    setChatInput(option);
+    handleSendMessage(option);
+  };
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'Summary':
@@ -365,31 +595,77 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
     }
 
     return (
-      <ScrollView style={styles.summaryContent} showsVerticalScrollIndicator={false}>
-        {/* Overview Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Overview</Text>
-          {structuredSummary.overview.map((bullet, index) => (
-            <View key={index} style={styles.bulletPoint}>
-              <View style={styles.bullet} />
-              <Text style={styles.bulletText}>{bullet}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Dynamic Sections */}
-        {structuredSummary.sections.map((section, sectionIndex) => (
-          <View key={sectionIndex} style={styles.section}>
-            <Text style={styles.sectionHeader}>{section.title}</Text>
-            {section.bullets.map((bullet, bulletIndex) => (
-              <View key={bulletIndex} style={styles.bulletPoint}>
-                <View style={styles.bullet} />
-                <Text style={styles.bulletText}>{bullet}</Text>
+      <View style={styles.summaryTabContainer}>
+        <ScrollView style={styles.summaryContent} showsVerticalScrollIndicator={false}>
+          {isEditMode ? (
+            <View style={styles.editContainer}>
+              <Text style={styles.editTitle}>Edit Summary</Text>
+              <TextInput
+                style={styles.editTextInput}
+                value={editedSummary}
+                onChangeText={setEditedSummary}
+                multiline
+                placeholder="Edit your summary here..."
+                textAlignVertical="top"
+              />
+              <View style={styles.editActions}>
+                <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveButton} onPress={handleSaveEdit}>
+                  <Text style={styles.saveButtonText}>Save Changes</Text>
+                </TouchableOpacity>
               </View>
-            ))}
+            </View>
+          ) : (
+            <>
+              {/* Overview Section */}
+              <View style={styles.section}>
+                <Text style={styles.sectionHeader}>Overview</Text>
+                {structuredSummary.overview.map((bullet, index) => (
+                  <View key={index} style={styles.bulletPoint}>
+                    <View style={styles.bullet} />
+                    <Text style={styles.bulletText}>{bullet}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Dynamic Sections */}
+              {structuredSummary.sections.map((section, sectionIndex) => (
+                <View key={sectionIndex} style={styles.section}>
+                  <Text style={styles.sectionHeader}>{section.title}</Text>
+                  {section.bullets.map((bullet, bulletIndex) => (
+                    <View key={bulletIndex} style={styles.bulletPoint}>
+                      <View style={styles.bullet} />
+                      <Text style={styles.bulletText}>{bullet}</Text>
+                    </View>
+                  ))}
+                </View>
+              ))}
+            </>
+          )}
+        </ScrollView>
+
+        {/* Actions Section */}
+        {!isEditMode && (
+          <View style={styles.actionsContainer}>
+            <TouchableOpacity style={styles.actionButton} onPress={handleRegenerateSummary}>
+              <Ionicons name="refresh" size={20} color="#007AFF" />
+              <Text style={styles.actionButtonText}>Regenerate</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.actionButton} onPress={handleEditSummary}>
+              <Ionicons name="create-outline" size={20} color="#007AFF" />
+              <Text style={styles.actionButtonText}>Edit</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.actionButton} onPress={handleDeleteSummary}>
+              <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+              <Text style={[styles.actionButtonText, { color: '#FF3B30' }]}>Delete</Text>
+            </TouchableOpacity>
           </View>
-        ))}
-      </ScrollView>
+        )}
+      </View>
     );
   };
 
@@ -417,16 +693,53 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
             </Text>
           </View>
 
-          <View style={styles.chatOptionsContainer}>
-            {structuredSummary?.chatOptions.map((option, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.chatOptionButton}
-                onPress={() => setChatInput(option)}
+          {/* Chat Options - only show if no messages */}
+          {chatMessages.length === 0 && (
+            <View style={styles.chatOptionsContainer}>
+              {structuredSummary?.chatOptions.map((option, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.chatOptionButton}
+                  onPress={() => handleChatOptionPress(option)}
+                >
+                  <Text style={styles.chatOptionText}>{option}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Chat Messages */}
+          <View style={styles.messagesContainer}>
+            {chatMessages.map((message) => (
+              <View
+                key={message.id}
+                style={[
+                  styles.messageContainer,
+                  message.isUser ? styles.userMessage : styles.botMessage
+                ]}
               >
-                <Text style={styles.chatOptionText}>{option}</Text>
-              </TouchableOpacity>
+                <Text style={[
+                  styles.messageText,
+                  message.isUser ? styles.userMessageText : styles.botMessageText
+                ]}>
+                  {message.text}
+                </Text>
+                <Text style={styles.messageTime}>
+                  {message.timestamp.toLocaleTimeString([], { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })}
+                </Text>
+              </View>
             ))}
+            
+            {/* Loading indicator */}
+            {isChatLoading && (
+              <View style={[styles.messageContainer, styles.botMessage]}>
+                <ActivityIndicator size="small" color="#007AFF" />
+                <Text style={styles.loadingText}>Thinking...</Text>
+              </View>
+            )}
           </View>
         </ScrollView>
 
@@ -438,9 +751,18 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
               onChangeText={setChatInput}
               placeholder="Type your question here..."
               multiline
+              onSubmitEditing={() => handleSendMessage(chatInput)}
             />
-            <TouchableOpacity style={styles.micButton}>
-              <Ionicons name="mic" size={20} color="#007AFF" />
+            <TouchableOpacity 
+              style={styles.sendButton}
+              onPress={() => handleSendMessage(chatInput)}
+              disabled={!chatInput.trim() || isChatLoading}
+            >
+              <Ionicons 
+                name="send" 
+                size={20} 
+                color={chatInput.trim() && !isChatLoading ? "#007AFF" : "#ccc"} 
+              />
             </TouchableOpacity>
           </View>
         </View>
@@ -452,9 +774,7 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-          <Ionicons name="arrow-back" size={24} color="#007AFF" />
-        </TouchableOpacity>
+        <View style={styles.backButton} />
         <Text style={styles.title}>{fileName.replace('.pdf', '')}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerAction}>
@@ -736,6 +1056,144 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  summaryTabContainer: {
+    flex: 1,
+  },
+  editContainer: {
+    padding: 20,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    margin: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  editTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 16,
+  },
+  editTextInput: {
+    minHeight: 200,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 16,
+    fontSize: 16,
+    color: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginBottom: 16,
+  },
+  editActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  saveButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  actionsContainer: {
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: 16,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    gap: 8,
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  messagesContainer: {
+    paddingVertical: 16,
+    gap: 12,
+  },
+  messageContainer: {
+    maxWidth: '80%',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  userMessage: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#007AFF',
+    borderBottomRightRadius: 4,
+  },
+  botMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'white',
+    borderBottomLeftRadius: 4,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  userMessageText: {
+    color: 'white',
+  },
+  botMessageText: {
+    color: '#1a1a1a',
+  },
+  messageTime: {
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.7,
+  },
+  sendButton: {
+    padding: 8,
+    marginLeft: 8,
   },
 });
 
