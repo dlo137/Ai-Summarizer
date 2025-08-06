@@ -7,6 +7,7 @@ import DocumentsScreen from '../screens/DocumentsScreen';
 import DocumentDetailScreen from '../screens/DocumentDetailScreen';
 import SummariesScreen from '../screens/SummariesScreen';
 import SummaryDetailScreen from '../screens/SummaryDetailScreen';
+import SummarizationScreen from '../screens/SummarizationScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AddDocumentScreen from '../screens/AddDocumentScreen';
 import SubscriptionScreen from '../screens/SubscriptionScreen';
@@ -36,6 +37,11 @@ const HomeStack = () => (
     <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: 'Home' }} />
     <Stack.Screen name="AddDocument" component={AddDocumentScreen} options={{ title: 'Add Document' }} />
     <Stack.Screen name="Subscription" component={SubscriptionScreen} options={{ title: 'Subscription' }} />
+    <Stack.Screen 
+      name="Summarization" 
+      component={SummarizationScreen} 
+      options={{ title: 'Document Summary' }} 
+    />
   </Stack.Navigator>
 );
 

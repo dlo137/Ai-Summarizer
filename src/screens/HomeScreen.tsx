@@ -17,8 +17,14 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { handlePdfUpload } from '../lib/pdfUploadService';
 
 type RootStackParamList = {
+  HomeScreen: undefined;
   AddDocument: undefined;
-  Summaries: undefined;
+  Subscription: undefined;
+  Summarization: {
+    documentId: string;
+    fileName: string;
+    publicUrl: string;
+  };
 };
 
 const HomeScreen = () => {
@@ -28,6 +34,11 @@ const HomeScreen = () => {
   const [showYoutubeModal, setShowYoutubeModal] = React.useState(false);
   const [showPdfModal, setShowPdfModal] = React.useState(false);
   const [pdfProgress, setPdfProgress] = React.useState(0);
+  const [currentDocument, setCurrentDocument] = React.useState<{
+    id: string;
+    fileName: string;
+    publicUrl: string;
+  } | null>(null);
   const progressAnim = React.useRef(new Animated.Value(0)).current;
 
   const handleYoutubeUrl = () => {
@@ -92,9 +103,17 @@ const HomeScreen = () => {
         clearInterval(timer);
         setTimeout(() => {
           setShowPdfModal(false);
-          Alert.alert('Success', 'File downloaded successfully!');
           setPdfProgress(0);
           progressAnim.setValue(0);
+          
+          // Navigate to Summarization screen if we have document data
+          if (currentDocument) {
+            navigation.navigate('Summarization', {
+              documentId: currentDocument.id,
+              fileName: currentDocument.fileName,
+              publicUrl: currentDocument.publicUrl,
+            });
+          }
         }, 200);
       }
     }, interval);
@@ -106,7 +125,13 @@ const HomeScreen = () => {
       const result = await handlePdfUpload();
       
       if (result) {
-        // File selected successfully, now show progress simulation
+        // File selected successfully, store document data
+        setCurrentDocument({
+          id: result.docRow.id || '',
+          fileName: result.fileName,
+          publicUrl: result.publicUrl,
+        });
+        
         console.log('Document record created:', {
           id: result.docRow.id,
           publicUrl: result.publicUrl,
@@ -163,7 +188,7 @@ const HomeScreen = () => {
     {
       title: 'Recent Summaries',
       icon: 'time',
-      onPress: () => navigation.navigate('Summaries'),
+      onPress: () => navigation.getParent()?.navigate('Summaries'),
       color: '#AF52DE',
     },
   ];

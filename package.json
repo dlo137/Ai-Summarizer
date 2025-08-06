@@ -16,6 +16,7 @@
     "@react-navigation/stack": "^7.4.5",
     "@stripe/stripe-react-native": "0.45.0",
     "@supabase/supabase-js": "^2.53.0",
+    "@vercel/node": "^5.3.11",
     "dotenv": "^17.2.1",
     "expo": "~53.0.20",
     "expo-document-picker": "^13.1.6",
