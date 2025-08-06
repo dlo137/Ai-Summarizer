@@ -118,60 +118,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 // Whisper fallback function
 import OpenAI from 'openai';
+import youtubedl from 'youtube-dl-exec';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_SECRET_KEY });
 
 async function whisperTranscribe(videoUrl: string): Promise<string | null> {
   try {
-    // Always get fresh info before downloading audio to avoid expired URLs (410)
-    let info;
-    try {
-      info = await ytdl.getInfo(videoUrl);
-    } catch (err: any) {
-      if (err?.statusCode === 410) {
-        console.warn('[DEBUG] ytdl.getInfo for audio returned 410');
-        throw new Error('Audio stream unavailable—cannot transcribe this video.');
-      }
-      throw err;
-    }
-
-    let audioStream;
-    try {
-      audioStream = ytdl.downloadFromInfo(info, { filter: 'audioonly' });
-    } catch (err: any) {
-      if (err?.statusCode === 410) {
-        console.warn('[DEBUG] ytdl.downloadFromInfo returned 410');
-        throw new Error('Audio stream unavailable—cannot transcribe this video.');
-      }
-      throw err;
-    }
-
-    const chunks: Buffer[] = [];
-    try {
-      for await (const chunk of audioStream) chunks.push(chunk);
-    } catch (err: any) {
-      if (err?.statusCode === 410) {
-        console.warn('[DEBUG] Audio stream fetch returned 410');
-        throw new Error('Audio stream unavailable—cannot transcribe this video.');
-      }
-      throw err;
-    }
-    const audioBuffer = Buffer.concat(chunks);
-
-    // Write buffer to a temp file and use fs.createReadStream
+    // Use yt-dlp via youtube-dl-exec to extract audio reliably
     const fs = await import('fs');
     const os = await import('os');
     const path = await import('path');
     const tempDir = os.tmpdir();
     const tempFilePath = path.join(tempDir, `youtube-audio-${Date.now()}.mp3`);
-    await fs.promises.writeFile(tempFilePath, audioBuffer);
-    const audioReadStream = fs.createReadStream(tempFilePath);
+
+    // Download audio using yt-dlp
+    try {
+      await youtubedl(videoUrl, {
+        extractAudio: true,
+        audioFormat: 'mp3',
+        output: tempFilePath,
+        noCheckCertificate: true,
+        noWarnings: true,
+        preferFreeFormats: true,
+        addHeader: [
+          'referer:youtube.com',
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+        ]
+      });
+    } catch (err: any) {
+      console.error('[DEBUG] yt-dlp audio extraction failed:', err);
+      return null;
+    }
+
+    // Read the audio file
+    let audioReadStream;
+    try {
+      audioReadStream = fs.createReadStream(tempFilePath);
+    } catch (err: any) {
+      console.error('[DEBUG] Failed to read yt-dlp audio file:', err);
+      return null;
+    }
 
     // Send to OpenAI Whisper
-    const translation = await openai.audio.translations.create({
-      file: audioReadStream,
-      model: 'whisper-1',
-      response_format: 'text',
-    });
+    let translation;
+    try {
+      translation = await openai.audio.translations.create({
+        file: audioReadStream,
+        model: 'whisper-1',
+        response_format: 'text',
+      });
+    } catch (err: any) {
+      console.error('[DEBUG] Whisper transcription error:', err);
+      return null;
+    }
 
     // Clean up temp file
     audioReadStream.on('close', () => {
@@ -180,12 +178,7 @@ async function whisperTranscribe(videoUrl: string): Promise<string | null> {
 
     return typeof translation === 'string' ? translation : null;
   } catch (err: any) {
-    // If we get a 410 or custom error, log and return null for final fallback
-    if (err?.message?.includes('Audio stream unavailable')) {
-      console.error('[DEBUG] Whisper fallback failed: audio stream unavailable (410)');
-      return null;
-    }
-    console.error('Whisper transcription error:', err);
+    console.error('[DEBUG] Whisper fallback failed:', err);
     return null;
   }
 }
