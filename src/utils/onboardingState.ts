@@ -8,11 +8,13 @@ export const setGlobalOnboardingComplete = (setter: (complete: boolean) => void)
 export const completeOnboarding = () => {
   if (globalSetOnboardingComplete) {
     console.log('Completing onboarding...');
-    globalSetOnboardingComplete(true);
-    // Verify the state change
+    // Use setTimeout to schedule the state update after the current render cycle
     setTimeout(() => {
-      console.log('Onboarding state should be updated now');
-    }, 50);
+      if (globalSetOnboardingComplete) {
+        globalSetOnboardingComplete(true);
+        console.log('Onboarding state updated');
+      }
+    }, 0);
   } else {
     console.warn('globalSetOnboardingComplete is not set');
   }
@@ -21,7 +23,13 @@ export const completeOnboarding = () => {
 export const handleLogout = () => {
   if (globalSetOnboardingComplete) {
     console.log('Logging out...');
-    globalSetOnboardingComplete(false);
+    // Use setTimeout to schedule the state update after the current render cycle
+    setTimeout(() => {
+      if (globalSetOnboardingComplete) {
+        globalSetOnboardingComplete(false);
+        console.log('Logout state updated');
+      }
+    }, 0);
   } else {
     console.warn('globalSetOnboardingComplete is not set');
   }

@@ -16,7 +16,7 @@ export default function App() {
   const [stripeInitialized, setStripeInitialized] = useState(false);
 
   // Set the global function when component mounts
-  React.useEffect(() => {
+  useEffect(() => {
     setGlobalOnboardingComplete(setOnboardingComplete);
   }, []);
 
