@@ -77,7 +77,11 @@ const HomeScreen = () => {
     setUrl('');
   };
 
-  const simulatePdfConversion = () => {
+  const simulatePdfConversion = (documentData?: {
+    id: string;
+    fileName: string;
+    publicUrl: string;
+  }) => {
     setShowPdfModal(true);
     setPdfProgress(0);
     progressAnim.setValue(0);
@@ -107,30 +111,37 @@ const HomeScreen = () => {
           progressAnim.setValue(0);
           
           // Navigate to Summarization screen if we have document data
-          if (currentDocument) {
+          const docToUse = documentData || currentDocument;
+          if (docToUse) {
+            console.log('Navigating to Summarization with:', docToUse);
             navigation.navigate('Summarization', {
-              documentId: currentDocument.id,
-              fileName: currentDocument.fileName,
-              publicUrl: currentDocument.publicUrl,
+              documentId: docToUse.id,
+              fileName: docToUse.fileName,
+              publicUrl: docToUse.publicUrl,
             });
+          } else {
+            console.warn('No current document data available for navigation');
           }
-        }, 200);
+        }, 500); // Increased delay to ensure modal closes properly
       }
     }, interval);
   };
 
   const pickPDF = async () => {
     try {
+      console.log('Starting PDF picker...');
       // First, let user select the PDF file
       const result = await handlePdfUpload();
       
       if (result) {
         // File selected successfully, store document data
-        setCurrentDocument({
+        const documentData = {
           id: result.docRow.id || '',
           fileName: result.fileName,
           publicUrl: result.publicUrl,
-        });
+        };
+        
+        setCurrentDocument(documentData);
         
         console.log('Document record created:', {
           id: result.docRow.id,
@@ -138,13 +149,17 @@ const HomeScreen = () => {
           name: result.fileName
         });
         
+        console.log('Current document set to:', documentData);
+        
         // Start the visual conversion process after file selection
-        simulatePdfConversion();
+        simulatePdfConversion(documentData);
+      } else {
+        console.warn('PDF upload result was null or undefined');
       }
     } catch (err) {
       setShowPdfModal(false);
       Alert.alert('Error', err instanceof Error ? err.message : 'Failed to process PDF');
-      console.error(err);
+      console.error('PDF upload error:', err);
     }
   };
 
