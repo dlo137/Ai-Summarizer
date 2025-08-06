@@ -194,18 +194,6 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Document Info */}
-        <View style={styles.documentInfo}>
-          <View style={styles.documentIcon}>
-            <Ionicons name="document-text" size={32} color="#007AFF" />
-          </View>
-          <View style={styles.documentDetails}>
-            <Text style={styles.documentTitle} numberOfLines={2}>
-              {fileName}
-            </Text>
-            <Text style={styles.documentId}>ID: {documentId}</Text>
-          </View>
-        </View>
 
         {/* Summary Content */}
         <View style={styles.contentSection}>
@@ -263,26 +251,6 @@ The conclusion emphasizes the significance of the findings and suggests areas fo
               </Text>
             </View>
           )}
-        </View>
-
-        <View style={styles.contentSection}>
-          <Text style={styles.sectionTitle}>Document Details</Text>
-          <View style={styles.detailsCard}>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>File Name:</Text>
-              <Text style={styles.detailValue}>{fileName}</Text>
-            </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Document ID:</Text>
-              <Text style={styles.detailValue}>{documentId}</Text>
-            </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Status:</Text>
-              <Text style={styles.detailValue}>
-                {isLoading ? 'Processing...' : hasError ? 'Error' : summary ? 'Summarized' : 'Ready for Summarization'}
-              </Text>
-            </View>
-          </View>
         </View>
       </ScrollView>
 
@@ -359,10 +327,6 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     marginBottom: 5,
   },
-  documentId: {
-    fontSize: 12,
-    color: '#666',
-  },
   contentSection: {
     marginBottom: 25,
   },
@@ -377,39 +341,6 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     fontStyle: 'italic',
-  },
-  detailsCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#1a1a1a',
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'right',
   },
   actionButtons: {
     flexDirection: 'row',
