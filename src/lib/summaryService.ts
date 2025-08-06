@@ -1,4 +1,7 @@
 import { supabase } from './supabase'
+import { summarize, SummarizationResult } from '../services/summarization'
+import { extractYouTubeTranscript, YouTubeExtractionResult } from '../services/extractors/youtube'
+import { extractArticleText, ArticleExtractionResult } from '../services/extractors/article'
 
 export type SummaryRow = {
   id?: string
@@ -9,9 +12,177 @@ export type SummaryRow = {
   word_count?: number
   created_at?: string
   updated_at?: string
+  // New fields for enhanced summaries
+  overview?: string[]
+  sections?: { title: string; bullets: string[] }[]
+  chat_options?: string[]
+  transcript?: string
+  source_type?: 'pdf' | 'youtube' | 'article'
+  source_url?: string
+  source_title?: string
   documents?: {
     title: string
     document_type: string
+  }
+}
+
+/**
+ * Process and summarize YouTube video content
+ * @param videoUrl YouTube video URL
+ * @param documentId Unique identifier for this content
+ * @returns Promise with summarization result
+ */
+export async function processYouTubeContent(
+  videoUrl: string,
+  documentId: string
+): Promise<SummarizationResult> {
+  try {
+    console.log('🎬 Processing YouTube content:', videoUrl);
+    
+    // Extract transcript from YouTube video
+    const extractionResult: YouTubeExtractionResult = await extractYouTubeTranscript(videoUrl);
+    
+    if (!extractionResult.transcript) {
+      throw new Error('Failed to extract transcript from YouTube video');
+    }
+    
+    // Summarize the transcript
+    const summarizationResult = await summarize(extractionResult.transcript, {
+      sourceType: 'youtube',
+      title: extractionResult.title,
+      transcript: extractionResult.transcript,
+    });
+    
+    // Save to database
+    await saveEnhancedSummaryRecord(documentId, summarizationResult, {
+      sourceUrl: videoUrl,
+      sourceTitle: extractionResult.title,
+    });
+    
+    console.log('✅ YouTube content processed successfully');
+    return summarizationResult;
+    
+  } catch (error) {
+    console.error('❌ Error processing YouTube content:', error);
+    throw error;
+  }
+}
+
+/**
+ * Process and summarize article content
+ * @param articleUrl Article URL
+ * @param documentId Unique identifier for this content
+ * @returns Promise with summarization result
+ */
+export async function processArticleContent(
+  articleUrl: string,
+  documentId: string
+): Promise<SummarizationResult> {
+  try {
+    console.log('📰 Processing article content:', articleUrl);
+    
+    // Extract text from article
+    const extractionResult: ArticleExtractionResult = await extractArticleText(articleUrl);
+    
+    if (!extractionResult.textContent) {
+      throw new Error('Failed to extract text from article');
+    }
+    
+    // Summarize the article text
+    const summarizationResult = await summarize(extractionResult.textContent, {
+      sourceType: 'article',
+      title: extractionResult.title,
+      originalText: extractionResult.textContent,
+    });
+    
+    // Save to database
+    await saveEnhancedSummaryRecord(documentId, summarizationResult, {
+      sourceUrl: articleUrl,
+      sourceTitle: extractionResult.title,
+    });
+    
+    console.log('✅ Article content processed successfully');
+    return summarizationResult;
+    
+  } catch (error) {
+    console.error('❌ Error processing article content:', error);
+    throw error;
+  }
+}
+
+/**
+ * Save enhanced summary record with new fields
+ * @param documentId Document identifier
+ * @param result Summarization result
+ * @param metadata Additional metadata
+ * @returns Promise with saved summary record
+ */
+export async function saveEnhancedSummaryRecord(
+  documentId: string,
+  result: SummarizationResult,
+  metadata: {
+    sourceUrl?: string;
+    sourceTitle?: string;
+  } = {}
+): Promise<SummaryRow> {
+  const user = await supabase.auth.getUser();
+  if (!user.data.user) throw new Error('Not authenticated');
+
+  // Check if summary already exists for this document
+  const existingSummary = await getSummaryByDocumentId(documentId);
+  if (existingSummary) {
+    console.log('Summary already exists for document:', documentId);
+    return existingSummary;
+  }
+
+  // Prepare enhanced data
+  const insertData: any = {
+    document_id: documentId,
+    user_id: user.data.user.id,
+    content: result.summary,
+    key_points: result.keyPoints,
+    word_count: result.wordCount,
+    overview: result.overview,
+    sections: result.sections,
+    chat_options: result.chatOptions,
+    transcript: result.transcript,
+    source_type: result.sourceType,
+    source_url: metadata.sourceUrl,
+    source_title: metadata.sourceTitle,
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from('summaries')
+      .insert([insertData])
+      .select()
+      .single();
+
+    if (error) {
+      // Fallback to basic insert if new columns don't exist yet
+      console.log('Enhanced insert failed, trying basic insert:', error);
+      const basicData = {
+        document_id: documentId,
+        user_id: user.data.user.id,
+        content: result.summary,
+        key_points: result.keyPoints,
+        word_count: result.wordCount,
+      };
+      
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('summaries')
+        .insert([basicData])
+        .select()
+        .single();
+      
+      if (fallbackError) throw fallbackError;
+      return fallbackData;
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error saving enhanced summary:', error);
+    throw error;
   }
 }
 

@@ -28,6 +28,44 @@ type RootStackParamList = {
 };
 
 const HomeScreen = () => {
+  // Simulate conversion for YouTube videos (reuse PDF logic)
+  const simulateYoutubeConversion = (videoData: { title: string; url: string; transcript: string }) => {
+    setShowPdfModal(true);
+    setPdfProgress(0);
+    progressAnim.setValue(0);
+
+    const duration = 3000;
+    const interval = 50;
+    const steps = duration / interval;
+    let currentStep = 0;
+
+    const timer = setInterval(() => {
+      currentStep++;
+      const progress = (currentStep / steps) * 100;
+      setPdfProgress(Math.round(progress));
+      Animated.timing(progressAnim, {
+        toValue: progress,
+        duration: interval,
+        useNativeDriver: false,
+      }).start();
+
+      if (currentStep >= steps) {
+        clearInterval(timer);
+        setTimeout(() => {
+          setShowPdfModal(false);
+          setPdfProgress(0);
+          progressAnim.setValue(0);
+          // Navigate to Summarization screen or show transcript
+          navigation.navigate('Summarization', {
+            documentId: '',
+            fileName: videoData.title,
+            publicUrl: videoData.url,
+            // Optionally pass transcript if Summarization screen supports it
+          });
+        }, 500);
+      }
+    }, interval);
+  };
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const [url, setUrl] = React.useState('');
   const [youtubeUrl, setYoutubeUrl] = React.useState('');
@@ -41,16 +79,33 @@ const HomeScreen = () => {
   } | null>(null);
   const progressAnim = React.useRef(new Animated.Value(0)).current;
 
-  const handleYoutubeUrl = () => {
+  const handleYoutubeUrl = async () => {
     if (!youtubeUrl.trim()) {
       Alert.alert('Error', 'Please enter a valid YouTube URL');
       return;
     }
-    // TODO: Handle YouTube URL processing
-    console.log('Processing YouTube URL:', youtubeUrl);
-    Alert.alert('Success', 'YouTube video added for processing!');
-    setYoutubeUrl('');
-    setShowYoutubeModal(false);
+    try {
+      // POST to backend API (Vercel production endpoint)
+      const response = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/youtube-captions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ videoUrl: youtubeUrl.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to extract transcript');
+      }
+      // Simulate conversion animation for YouTube video
+      simulateYoutubeConversion({ title: data.title, url: youtubeUrl, transcript: data.transcript });
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to extract transcript');
+      console.error('YouTube transcript error:', err);
+    } finally {
+      setYoutubeUrl('');
+      setShowYoutubeModal(false);
+    }
   };
 
   const addWebsite = () => {

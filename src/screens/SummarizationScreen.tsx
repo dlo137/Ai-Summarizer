@@ -10,13 +10,19 @@ import {
   Alert,
   TextInput,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { WebView } from 'react-native-webview';
 import { saveSummaryRecord, deleteSummaryByDocumentId } from '../lib/summaryService';
 import { updateDocumentStatus } from '../lib/documentService';
 import { Summary } from '../types';
+// Import new content type handlers
+import { processYouTubeContent, processArticleContent } from '../lib/summaryService';
+import { isYouTubeUrl } from '../services/extractors/youtube';
+import { isLikelyArticleUrl } from '../services/extractors/article';
 
 type RootStackParamList = {
   HomeScreen: undefined;
@@ -25,6 +31,8 @@ type RootStackParamList = {
     fileName: string;
     publicUrl?: string;
     summary?: Summary;
+    contentType?: 'pdf' | 'youtube' | 'article';
+    sourceUrl?: string; // For YouTube/Article URLs
   };
   Summaries: undefined;
 };
@@ -36,13 +44,20 @@ const SummarizationScreen = () => {
   const navigation = useNavigation<SummarizationScreenNavigationProp>();
   const route = useRoute<SummarizationScreenRouteProp>();
   
-  const { documentId, fileName, publicUrl, summary: existingSummary } = route.params;
+  const { 
+    documentId, 
+    fileName, 
+    publicUrl, 
+    summary: existingSummary,
+    contentType = 'pdf',
+    sourceUrl 
+  } = route.params;
   
   const [summary, setSummary] = useState<string>('');
   const [keyPoints, setKeyPoints] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'Summary' | 'PDF' | 'Chat'>('Summary');
+  const [activeTab, setActiveTab] = useState<'Summary' | 'PDF' | 'Video' | 'Article' | 'Chat'>('Summary');
   const [chatInput, setChatInput] = useState('');
   const [structuredSummary, setStructuredSummary] = useState<{
     overview: string[];
@@ -59,6 +74,49 @@ const SummarizationScreen = () => {
   }>>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [documentText, setDocumentText] = useState<string>('');
+
+  // Get available tabs based on content type
+  const getAvailableTabs = (): ('Summary' | 'PDF' | 'Video' | 'Article' | 'Chat')[] => {
+    const tabs: ('Summary' | 'PDF' | 'Video' | 'Article' | 'Chat')[] = ['Summary'];
+    
+    if (contentType === 'pdf' && publicUrl) {
+      tabs.push('PDF');
+    } else if (contentType === 'youtube' && sourceUrl) {
+      tabs.push('Video');
+    } else if (contentType === 'article' && sourceUrl) {
+      tabs.push('Article');
+    }
+    
+    tabs.push('Chat');
+    return tabs;
+  };
+
+  const availableTabs = getAvailableTabs();
+
+  // Helper function to get default chat options based on content type
+  const getDefaultChatOptions = (type: 'pdf' | 'youtube' | 'article'): string[] => {
+    switch (type) {
+      case 'youtube':
+        return [
+          "What were the main points of this video?",
+          "Can you explain the key concepts discussed?",
+          "What are the practical applications mentioned?"
+        ];
+      case 'article':
+        return [
+          "What is the author's main argument?",
+          "What evidence supports the claims?",
+          "How does this relate to current trends?"
+        ];
+      case 'pdf':
+      default:
+        return [
+          "Key points in the document",
+          "Main responsibilities", 
+          "Draft a job application email"
+        ];
+    }
+  };
 
   // Function to summarize text using OpenAI API
   const summarizeText = async (text: string) => {
@@ -224,7 +282,7 @@ Please provide a helpful and accurate answer based only on the information in th
         setStructuredSummary({
           overview: existingSummary.overview,
           sections: existingSummary.sections,
-          chatOptions: existingSummary.chatOptions || ["Key points in the document", "Main responsibilities", "Draft a job application email"]
+          chatOptions: existingSummary.chatOptions || getDefaultChatOptions(contentType)
         });
       } else {
         // Parse the existing summary into structured format
@@ -555,6 +613,10 @@ Please provide a helpful and accurate answer based only on the information in th
         return renderSummaryTab();
       case 'PDF':
         return renderPDFTab();
+      case 'Video':
+        return renderVideoTab();
+      case 'Article':
+        return renderArticleTab();
       case 'Chat':
         return renderChatTab();
       default:
@@ -683,6 +745,163 @@ Please provide a helpful and accurate answer based only on the information in th
     );
   };
 
+  const renderVideoTab = () => {
+    if (!sourceUrl) {
+      return (
+        <View style={styles.pdfContainer}>
+          <View style={styles.pdfPlaceholder}>
+            <Ionicons name="videocam-outline" size={64} color="#ccc" />
+            <Text style={styles.pdfPlaceholderText}>Video Not Available</Text>
+            <Text style={styles.pdfSubtext}>
+              No video URL available for this content
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.pdfContainer}>
+        {/* Video Info Header */}
+        <View style={styles.pdfHeader}>
+          <Text style={styles.pdfTitle}>{fileName}</Text>
+          <Text style={styles.pdfPageInfo}>
+            YouTube Video Viewer
+          </Text>
+        </View>
+
+        {/* Video WebView */}
+        <View style={styles.pdfViewerContainer}>
+          <WebView
+            source={{ uri: sourceUrl }}
+            style={styles.pdfWebView}
+            startInLoadingState={true}
+            renderLoading={() => (
+              <View style={styles.pdfLoadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.pdfLoadingText}>Loading Video...</Text>
+              </View>
+            )}
+            onError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('WebView error: ', nativeEvent);
+            }}
+            onLoadEnd={() => {
+              console.log('Video loaded successfully');
+            }}
+            allowsFullscreenVideo={true}
+            allowsInlineMediaPlayback={true}
+          />
+        </View>
+
+        {/* Video Actions */}
+        <View style={styles.pdfActions}>
+          <TouchableOpacity 
+            style={styles.openPdfButton}
+            onPress={() => {
+              Linking.openURL(sourceUrl).catch((err: any) => {
+                console.error('Error opening video:', err);
+                Alert.alert('Error', 'Could not open video in external player');
+              });
+            }}
+          >
+            <Ionicons name="open-outline" size={20} color="white" />
+            <Text style={styles.openPdfText}>Open in YouTube</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.refreshPdfButton}
+            onPress={() => {
+              console.log('Refreshing video viewer');
+            }}
+          >
+            <Ionicons name="refresh-outline" size={20} color="#007AFF" />
+            <Text style={styles.refreshPdfText}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  const renderArticleTab = () => {
+    if (!sourceUrl) {
+      return (
+        <View style={styles.pdfContainer}>
+          <View style={styles.pdfPlaceholder}>
+            <Ionicons name="document-text-outline" size={64} color="#ccc" />
+            <Text style={styles.pdfPlaceholderText}>Article Not Available</Text>
+            <Text style={styles.pdfSubtext}>
+              No article URL available for this content
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.pdfContainer}>
+        {/* Article Info Header */}
+        <View style={styles.pdfHeader}>
+          <Text style={styles.pdfTitle}>{fileName}</Text>
+          <Text style={styles.pdfPageInfo}>
+            Article Viewer
+          </Text>
+        </View>
+
+        {/* Article WebView */}
+        <View style={styles.pdfViewerContainer}>
+          <WebView
+            source={{ uri: sourceUrl }}
+            style={styles.pdfWebView}
+            startInLoadingState={true}
+            renderLoading={() => (
+              <View style={styles.pdfLoadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.pdfLoadingText}>Loading Article...</Text>
+              </View>
+            )}
+            onError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('WebView error: ', nativeEvent);
+            }}
+            onLoadEnd={() => {
+              console.log('Article loaded successfully');
+            }}
+            scalesPageToFit={true}
+            showsVerticalScrollIndicator={true}
+            showsHorizontalScrollIndicator={true}
+          />
+        </View>
+
+        {/* Article Actions */}
+        <View style={styles.pdfActions}>
+          <TouchableOpacity 
+            style={styles.openPdfButton}
+            onPress={() => {
+              Linking.openURL(sourceUrl).catch((err: any) => {
+                console.error('Error opening article:', err);
+                Alert.alert('Error', 'Could not open article in external browser');
+              });
+            }}
+          >
+            <Ionicons name="open-outline" size={20} color="white" />
+            <Text style={styles.openPdfText}>Open in Browser</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.refreshPdfButton}
+            onPress={() => {
+              console.log('Refreshing article viewer');
+            }}
+          >
+            <Ionicons name="refresh-outline" size={20} color="#007AFF" />
+            <Text style={styles.refreshPdfText}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderChatTab = () => {
     return (
       <View style={styles.chatContainer}>
@@ -791,7 +1010,7 @@ Please provide a helpful and accurate answer based only on the information in th
 
       {/* Segmented Control */}
       <View style={styles.segmentedControl}>
-        {(['Summary', 'PDF', 'Chat'] as const).map((tab) => (
+        {availableTabs.map((tab) => (
           <TouchableOpacity
             key={tab}
             style={[
@@ -920,12 +1139,13 @@ const styles = StyleSheet.create({
   },
   pdfContainer: {
     flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  pdfPlaceholder: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
-  },
-  pdfPlaceholder: {
-    alignItems: 'center',
   },
   pdfPlaceholderText: {
     fontSize: 18,
@@ -1194,6 +1414,96 @@ const styles = StyleSheet.create({
   sendButton: {
     padding: 8,
     marginLeft: 8,
+  },
+  // Additional PDF Viewer Styles
+  pdfHeader: {
+    padding: 20,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  pdfTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  pdfPageInfo: {
+    fontSize: 14,
+    color: '#666',
+  },
+  pdfViewerContainer: {
+    flex: 1,
+    margin: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  pdfWebView: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  pdfLoadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  pdfLoadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 10,
+  },
+  pdfActions: {
+    padding: 20,
+    gap: 12,
+    flexDirection: 'row',
+  },
+  openPdfButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    gap: 8,
+  },
+  openPdfText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  refreshPdfButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'white',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    gap: 8,
+  },
+  refreshPdfText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
   },
 });
 
