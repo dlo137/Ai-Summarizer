@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const title = info.videoDetails.title;
     const duration = parseInt(info.videoDetails.lengthSeconds);
 
-    // Find caption tracks
+    // Always grab a fresh track.baseUrl right before fetching
     const captionTracks = info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
     if (!captionTracks || captionTracks.length === 0) {
       // Fallback: Use Whisper if no captions
@@ -47,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ transcript, title, duration });
     }
 
-    // Fetch the caption XML
+    // Fetch captions immediately
     const captionRes = await fetch(track.baseUrl);
     if (captionRes.status === 410) {
       // Fallback: Use Whisper if captions endpoint returns 410
