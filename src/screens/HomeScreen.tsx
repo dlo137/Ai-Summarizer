@@ -308,7 +308,7 @@ const HomeScreen = () => {
         .update({ content: storageUrl })
         .eq('id', documentId);
 
-      // 7. Invoke your Vercel transcription endpoint (send signed audioUrl and documentId)
+      // 7. Invoke your Vercel transcription endpoint (send signed audioUrl and documentId)_
       const resp = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
