@@ -1,5 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import ytdl from 'ytdl-core';
+import OpenAI from 'openai';
+import { writeFileSync, unlinkSync, createReadStream } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_SECRET_KEY });
 
 /**
  * Vercel serverless function to fetch YouTube captions (transcript) for a given video URL
@@ -116,70 +122,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-// Whisper fallback function
-import OpenAI from 'openai';
-import youtubedl from 'youtube-dl-exec';
-const openai = new OpenAI({ apiKey: process.env.OPENAI_SECRET_KEY });
-
 async function whisperTranscribe(videoUrl: string): Promise<string | null> {
+  const tempFile = join(tmpdir(), `youtube-audio-${Date.now()}.mp3`);
+  
   try {
-    // Use yt-dlp via youtube-dl-exec to extract audio reliably
-    const fs = await import('fs');
-    const os = await import('os');
-    const path = await import('path');
-    const tempDir = os.tmpdir();
-    const tempFilePath = path.join(tempDir, `youtube-audio-${Date.now()}.mp3`);
-
-    // Download audio using yt-dlp
-    try {
-      await youtubedl(videoUrl, {
-        extractAudio: true,
-        audioFormat: 'mp3',
-        output: tempFilePath,
-        noCheckCertificate: true,
-        noWarnings: true,
-        preferFreeFormats: true,
-        addHeader: [
-          'referer:youtube.com',
-          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-        ]
-      });
-    } catch (err: any) {
-      console.error('[DEBUG] yt-dlp audio extraction failed:', err);
-      return null;
-    }
-
-    // Read the audio file
-    let audioReadStream;
-    try {
-      audioReadStream = fs.createReadStream(tempFilePath);
-    } catch (err: any) {
-      console.error('[DEBUG] Failed to read yt-dlp audio file:', err);
-      return null;
-    }
-
-    // Send to OpenAI Whisper
-    let translation;
-    try {
-      translation = await openai.audio.translations.create({
-        file: audioReadStream,
-        model: 'whisper-1',
-        response_format: 'text',
-      });
-    } catch (err: any) {
-      console.error('[DEBUG] Whisper transcription error:', err);
-      return null;
-    }
-
-    // Clean up temp file
-    audioReadStream.on('close', () => {
-      fs.promises.unlink(tempFilePath).catch(() => {});
+    console.log('[DEBUG] Starting audio extraction for:', videoUrl);
+    
+    // Get audio stream from YouTube
+    const audioStream = ytdl(videoUrl, {
+      filter: 'audioonly',
+      quality: 'highestaudio',
+      highWaterMark: 1 << 25, // 32MB buffer
     });
 
-    return typeof translation === 'string' ? translation : null;
+    // Convert stream to buffer and save to temp file
+    const chunks: any[] = [];
+    for await (const chunk of audioStream) {
+      chunks.push(chunk);
+    }
+    const audioBuffer = Buffer.concat(chunks);
+    writeFileSync(tempFile, audioBuffer);
+    
+    console.log('[DEBUG] Audio saved to temp file:', tempFile);
+    
+    // Send to Whisper API
+    console.log('[DEBUG] Starting Whisper transcription');
+    const response = await openai.audio.transcriptions.create({
+      file: await import('fs').then(fs => fs.createReadStream(tempFile)),
+      model: 'whisper-1',
+      response_format: 'text',
+    });
+    
+    console.log('[DEBUG] Whisper transcription successful');
+    return response;
+    
   } catch (err: any) {
-    console.error('[DEBUG] Whisper fallback failed:', err);
+    console.error('[DEBUG] Processing error:', err);
     return null;
+  } finally {
+    // Clean up temp file
+    try {
+      unlinkSync(tempFile);
+      console.log('[DEBUG] Temp file deleted');
+    } catch (cleanupErr) {
+      console.warn('[DEBUG] Failed to delete temp file:', cleanupErr);
+    }
   }
 }
 

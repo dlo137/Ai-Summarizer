@@ -114,17 +114,42 @@ const DocumentDetailScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Content Preview</Text>
           <View style={styles.contentCard}>
-            {document.content ? (
-              <Text style={styles.contentText} numberOfLines={10}>
-                {document.content}
-              </Text>
+            {document.type === 'url' && document.url?.includes('youtube.com') ? (
+              <View>
+                <View style={styles.videoContainer}>
+                  <TouchableOpacity 
+                    style={styles.videoPreview}
+                    onPress={() => {
+                      // Open video in browser or native YouTube app
+                      if (document.url) {
+                        // @ts-ignore
+                        window.open(document.url, '_blank');
+                      }
+                    }}
+                  >
+                    <Ionicons name="logo-youtube" size={48} color="#FF0000" />
+                    <Text style={styles.videoPlayText}>Click to watch video</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.documentUrl} numberOfLines={1}>
+                  {document.url}
+                </Text>
+              </View>
             ) : (
-              <Text style={styles.noContentText}>No content preview available</Text>
-            )}
-            {document.url && (
-              <Text style={styles.documentUrl} numberOfLines={1}>
-                {document.url}
-              </Text>
+              <>
+                {document.content ? (
+                  <Text style={styles.contentText} numberOfLines={10}>
+                    {document.content}
+                  </Text>
+                ) : (
+                  <Text style={styles.noContentText}>No content preview available</Text>
+                )}
+                {document.url && document.type !== 'url' && (
+                  <Text style={styles.documentUrl} numberOfLines={1}>
+                    {document.url}
+                  </Text>
+                )}
+              </>
             )}
           </View>
         </View>
@@ -180,6 +205,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  videoContainer: {
+    height: 200,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  videoPreview: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+    opacity: 0.8,
+  },
+  videoPlayText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
   },
   scrollContent: {
     padding: 20,

@@ -1,5 +1,11 @@
-// Note: This is a React Native compatible version
-// For full ytdl-core functionality, you'd need a backend API
+// Note: This is a React Native compatible version with long-polling support
+// Interfaces first
+export interface TranscriptionJob {
+  jobId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  transcript?: string;
+  error?: string;
+}
 
 export interface YouTubeExtractionResult {
   transcript: string;
@@ -8,9 +14,16 @@ export interface YouTubeExtractionResult {
   error?: string;
 }
 
+export interface TranscriptionJob {
+  jobId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  transcript?: string;
+  error?: string;
+}
+
 /**
  * Extract transcript from YouTube video URL
- * Note: This is a simplified version for React Native
+ * Note: This version implements long-polling for transcription status
  * @param videoUrl YouTube video URL
  * @returns Promise with transcript and metadata
  */
@@ -33,20 +46,19 @@ export async function extractYouTubeTranscript(videoUrl: string): Promise<YouTub
     // Try to fetch video info using public APIs
     const videoInfo = await fetchVideoInfo(videoId);
     
-    // Try to get captions if available
-    const transcript = await fetchVideoCaptions(videoId);
+    // Start transcription job and poll for results
+    const transcriptionResult = await startAndPollTranscription(videoUrl);
     
-    if (!transcript) {
-      throw new Error(
+    if (!transcriptionResult.transcript) {
+      throw new Error(transcriptionResult.error || 
         'Could not extract transcript from this video. ' +
         'This may be because the video does not have captions available, ' +
-        'or the video is private/restricted. ' +
-        'For full YouTube transcript extraction, consider implementing a backend service with ytdl-core.'
+        'or the video is private/restricted.'
       );
     }
 
     return {
-      transcript,
+      transcript: transcriptionResult.transcript,
       title: videoInfo.title || 'YouTube Video',
       duration: videoInfo.duration || 0,
     };
@@ -66,29 +78,25 @@ export async function extractYouTubeTranscript(videoUrl: string): Promise<YouTub
  * @param videoId YouTube video ID
  * @returns Video information
  */
+/**
+ * Fetch basic video information using the YouTube Data API
+ * @param videoId YouTube video ID
+ * @returns Video information
+ */
 async function fetchVideoInfo(videoId: string): Promise<{title: string; duration: number}> {
   try {
-    // Note: This is a placeholder. In a real app, you'd use YouTube Data API
-    // or implement this in your backend with proper API keys
-    
-    // For demo purposes, we'll extract title from the page
-    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
+    // Get video info from our backend which uses YouTube Data API
+    const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/youtube-info/${videoId}`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch video page');
+      throw new Error('Failed to fetch video info');
     }
     
-    const html = await response.text();
-    
-    // Extract title from page HTML
-    const titleMatch = html.match(/<title>([^<]+)<\/title>/);
-    const title = titleMatch ? titleMatch[1].replace(' - YouTube', '') : 'YouTube Video';
-    
-    return { title, duration: 0 };
+    const data = await response.json();
+    return {
+      title: data.title || 'YouTube Video',
+      duration: data.duration || 0
+    };
     
   } catch (error) {
     console.warn('Could not fetch video info:', error);
@@ -97,30 +105,85 @@ async function fetchVideoInfo(videoId: string): Promise<{title: string; duration
 }
 
 /**
- * Attempt to fetch video captions
- * @param videoId YouTube video ID
- * @returns Transcript text or null
+ * Check the status of a transcription job
+ * @param jobId The ID of the transcription job
+ * @returns The current status of the job
  */
-async function fetchVideoCaptions(videoId: string): Promise<string | null> {
+async function checkTranscriptionStatus(jobId: string): Promise<TranscriptionJob> {
+  const response = await fetch(
+    `${process.env.EXPO_PUBLIC_API_URL}/api/youtube-transcribe/status/${jobId}`
+  );
+  
+  if (!response.ok) {
+    throw new Error('Failed to check transcription status');
+  }
+  
+  return await response.json();
+}
+
+/**
+ * Start a transcription job and poll for results
+ * @param videoUrl YouTube video URL
+ * @returns Promise with transcription result
+ */
+async function startAndPollTranscription(videoUrl: string): Promise<TranscriptionJob> {
   try {
-    // Note: This is a simplified approach. Real implementation would need:
-    // 1. YouTube Data API key to get caption tracks
-    // 2. Backend service to fetch and parse caption files
-    // 3. Proper handling of different caption formats
+    // Start transcription job
+    const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/youtube-transcribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ videoUrl }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to start transcription');
+    }
+
+    const { jobId } = await response.json();
     
-    console.log('📝 Attempting to fetch captions for video:', videoId);
+    // Poll for results
+    const maxAttempts = 30; // 5 minutes maximum (10 second intervals)
+    let attempts = 0;
     
-    // This is a placeholder - in a real app you'd implement this properly
-    // with YouTube Data API or a backend service
+    while (attempts < maxAttempts) {
+      const statusResponse = await fetch(
+        `${process.env.EXPO_PUBLIC_API_URL}/api/youtube-transcribe/status/${jobId}`
+      );
+      
+      if (!statusResponse.ok) {
+        throw new Error('Failed to check transcription status');
+      }
+      
+      const job: TranscriptionJob = await statusResponse.json();
+      
+      if (job.status === 'completed') {
+        return job;
+      }
+      
+      if (job.status === 'failed') {
+        throw new Error(job.error || 'Transcription failed');
+      }
+      
+      // Wait 10 seconds before next poll
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      attempts++;
+    }
     
-    // For now, return null to indicate captions not available
-    return null;
+    throw new Error('Transcription timed out');
     
   } catch (error) {
-    console.warn('Could not fetch captions:', error);
-    return null;
+    console.warn('Transcription error:', error);
+    return {
+      jobId: '',
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    };
   }
 }
+
 
 /**
  * Extract YouTube video ID from various URL formats

@@ -22,6 +22,50 @@ type RootStackParamList = {
   DocumentDetail: { document: Document };
 };
 
+// Move getDocumentIcon above DocumentsScreen so it is in scope
+const getDocumentIcon = (type: DocumentRow['document_type']) => {
+  switch (type) {
+    case 'pdf':
+      return 'document-text';
+    case 'article':
+      return 'globe';
+    case 'youtube':
+      return 'logo-youtube';
+    case 'audio':
+      return 'musical-notes';
+    default:
+      return 'document';
+  }
+};
+
+const getDocumentColor = (type: DocumentRow['document_type']) => {
+  switch (type) {
+    case 'pdf':
+      return '#007AFF';
+    case 'article':
+      return '#34C759';
+    case 'youtube':
+      return '#FF0000';
+    case 'audio':
+      return '#AF52DE';
+    default:
+      return '#666';
+  }
+};
+
+const getStatusColor = (status: DocumentRow['status']) => {
+  switch (status) {
+    case 'pending':
+      return '#FF9500';
+    case 'text_extracted':
+      return '#007AFF';
+    case 'summarized':
+      return '#34C759';
+    default:
+      return '#666';
+  }
+};
+
 const DocumentsScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [searchQuery, setSearchQuery] = useState('');
@@ -69,67 +113,11 @@ const DocumentsScreen = () => {
 
   // Filter documents based on search query
   const filteredDocuments = documents.filter((doc) =>
-    doc.title.toLowerCase().includes(searchQuery.toLowerCase())
+    doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (doc.document_type === 'article' && doc.content && doc.content.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const getDocumentIcon = (type: DocumentRow['document_type']) => {
-    switch (type) {
-      case 'pdf':
-        return 'document-text';
-      case 'article':
-        return 'globe';
-      case 'youtube':
-        return 'logo-youtube';
-      case 'audio':
-        return 'musical-notes';
-      default:
-        return 'document';
-    }
-  };
-
-  const getDocumentColor = (type: DocumentRow['document_type']) => {
-    switch (type) {
-      case 'pdf':
-        return '#007AFF';
-      case 'article':
-        return '#34C759';
-      case 'youtube':
-        return '#FF0000';
-      case 'audio':
-        return '#AF52DE';
-      default:
-        return '#666';
-    }
-  };
-
-  const formatFileSize = (sizeInBytes?: number) => {
-    if (!sizeInBytes) return 'Unknown size';
-    
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = sizeInBytes;
-    let unitIndex = 0;
-    
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex++;
-    }
-    
-    return `${size.toFixed(1)} ${units[unitIndex]}`;
-  };
-
-  const getStatusColor = (status: DocumentRow['status']) => {
-    switch (status) {
-      case 'pending':
-        return '#FF9500';
-      case 'text_extracted':
-        return '#007AFF';
-      case 'summarized':
-        return '#34C759';
-      default:
-        return '#666';
-    }
-  };
-
+  // Add: Convert past article links to clickable links in the document list
   const renderDocument = ({ item }: { item: DocumentRow }) => (
     <TouchableOpacity
       style={styles.documentCard}
@@ -172,7 +160,22 @@ const DocumentsScreen = () => {
         <Text style={styles.documentDate}>
           {new Date(item.created_at || '').toLocaleDateString()}
         </Text>
-        {item.content && (
+        {item.document_type === 'article' && item.content && (
+          <Text
+            style={[styles.documentUrl, { textDecorationLine: 'underline' }]}
+            numberOfLines={1}
+            onPress={() => {
+              // Open the article link in browser
+              if (item.content.startsWith('http')) {
+                // @ts-ignore
+                window.open(item.content, '_blank');
+              }
+            }}
+          >
+            {item.content.length > 50 ? `${item.content.substring(0, 50)}...` : item.content}
+          </Text>
+        )}
+        {item.document_type !== 'article' && item.content && (
           <Text style={styles.documentUrl} numberOfLines={1}>
             {item.content.length > 50 ? `${item.content.substring(0, 50)}...` : item.content}
           </Text>
@@ -412,4 +415,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default DocumentsScreen; 
+export default DocumentsScreen;

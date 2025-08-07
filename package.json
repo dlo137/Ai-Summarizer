@@ -36,7 +36,7 @@
     "react-native-url-polyfill": "^2.0.0",
     "react-native-webview": "13.13.5",
     "stripe": "^18.4.0",
-    "youtube-dl-exec": "^3.0.23",
+    "yt-dlp-static": "^1.0.3",
     "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
