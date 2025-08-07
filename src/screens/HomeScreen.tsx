@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { handlePdfUpload } from '../lib/pdfUploadService';
-import DocumentPicker from 'react-native-document-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { supabase } from '../lib/supabase';
 
 type RootStackParamList = {
@@ -232,60 +232,92 @@ const HomeScreen = () => {
   const pickAudio = async () => {
     try {
       // 1. Pick audio file
-      const res = await DocumentPicker.pickSingle({
-        type: [DocumentPicker.types.audio],
+      const res = await DocumentPicker.getDocumentAsync({
+        type: 'audio/*',
+        copyToCacheDirectory: true,
+        multiple: false,
       });
-
-      // 2. Upload to Supabase Storage
-      const file = res;
-
-      // Defensive: file.name and file.type may be null
-      if (!file.name || !file.type) {
-        throw new Error('Invalid file: missing name or type');
+      if (res.canceled) return;
+      const file = res.assets && res.assets[0];
+      if (!file || !file.name || !file.mimeType || !file.uri) {
+        throw new Error('Invalid file: missing name, type, or uri');
       }
       const fileExt = file.name.split('.').pop();
       const fileName = `audio_${Date.now()}.${fileExt}`;
 
-      // Fetch the file as a blob (React Native workaround)
+      // Get the current user (must await the promise)
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user?.id) {
+        throw new Error('User not authenticated or failed to get user ID');
+      }
+      const userId = userData.user.id;
+
+      // 2. Insert a new row into the documents table
+      const { data: docRow, error: docError } = await supabase
+        .from('documents')
+        .insert([
+          {
+            user_id: userId,
+            title: file.name,
+            document_type: 'audio',
+            // Add other fields as needed (e.g., status, created_at)
+          },
+        ])
+        .select()
+        .single();
+      if (docError || !docRow?.id) {
+        console.error('Supabase document insert error:', docError);
+        Alert.alert('Failed to insert document record', docError?.message || JSON.stringify(docError));
+        return;
+      }
+      const documentId = docRow.id;
+
+      // 3. Fetch the file as a blob (Expo workaround)
       const response = await fetch(file.uri);
       const blob = await response.blob();
 
+      // 4. Upload to Supabase Storage
       const { data, error } = await supabase
         .storage
-        .from('audio-uploads')
+        .from('audio')
         .upload(fileName, blob, {
-          contentType: file.type,
+          contentType: file.mimeType,
           upsert: false,
+          metadata: { owner: userId },
         });
-
       if (error) throw error;
 
-      // 3. Get public URL
+      // 5. Get public URL
       const { data: urlData } = supabase
         .storage
-        .from('audio-uploads')
+        .from('audio')
         .getPublicUrl(fileName);
       const publicUrl = urlData?.publicUrl;
       if (!publicUrl) throw new Error('Failed to get public URL');
 
-      // 4. Invoke your Vercel transcription endpoint
+      // 6. Optionally update the document row with the public URL
+      await supabase
+        .from('documents')
+        .update({ public_url: publicUrl })
+        .eq('id', documentId);
+
+      // 7. Invoke your Vercel transcription endpoint (send both audioUrl and documentId)
       const resp = await fetch('https://<your-vercel-domain>/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl: publicUrl }),
+        body: JSON.stringify({ audioUrl: publicUrl, documentId }),
       });
 
       const { transcript } = await resp.json();
       if (!transcript) throw new Error('No transcript returned');
 
-      // 5. Navigate to your Summarization screen (pass transcript as fileName for now)
+      // 8. Navigate to your Summarization screen
       navigation.navigate('Summarization', {
-        documentId: '',
-        fileName: 'Audio Transcript',
+        documentId: documentId,
+        fileName: file.name,
         publicUrl: publicUrl,
         // Optionally, you can pass transcript via context or another param if needed
       });
-
     } catch (err: any) {
       console.error('Audio pick/upload/transcribe error:', err);
       Alert.alert('Failed to process audio', err.message);
@@ -698,4 +730,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default HomeScreen; 
+export default HomeScreen;

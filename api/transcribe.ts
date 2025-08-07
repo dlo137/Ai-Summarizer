@@ -12,9 +12,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { audioUrl } = req.body || {};
+  const { audioUrl, documentId } = req.body || {};
   if (!audioUrl || typeof audioUrl !== 'string') {
     return res.status(400).json({ error: 'Missing or invalid audioUrl' });
+  }
+  if (!documentId || typeof documentId !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid documentId' });
   }
 
   try {
@@ -42,6 +45,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Clean up temp file
     try { fs.unlinkSync(tmpFile); } catch {}
+
+    // Update Supabase document with transcript
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    await supabase
+      .from('documents')
+      .update({ content: transcription })
+      .eq('id', documentId);
 
     return res.status(200).json({ transcript: transcription });
   } catch (err: any) {
