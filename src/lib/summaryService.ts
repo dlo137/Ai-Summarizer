@@ -1,6 +1,5 @@
 import { supabase } from './supabase'
 import { summarize, SummarizationResult } from '../services/summarization'
-import { extractYouTubeTranscript, YouTubeExtractionResult } from '../services/extractors/youtube'
 import { extractArticleText, ArticleExtractionResult } from '../services/extractors/article'
 
 export type SummaryRow = {
@@ -32,41 +31,7 @@ export type SummaryRow = {
  * @param documentId Unique identifier for this content
  * @returns Promise with summarization result
  */
-export async function processYouTubeContent(
-  videoUrl: string,
-  documentId: string
-): Promise<SummarizationResult> {
-  try {
-    console.log('🎬 Processing YouTube content:', videoUrl);
     
-    // Extract transcript from YouTube video
-    const extractionResult: YouTubeExtractionResult = await extractYouTubeTranscript(videoUrl);
-    
-    if (!extractionResult.transcript) {
-      throw new Error('Failed to extract transcript from YouTube video');
-    }
-    
-    // Summarize the transcript
-    const summarizationResult = await summarize(extractionResult.transcript, {
-      sourceType: 'youtube',
-      title: extractionResult.title,
-      transcript: extractionResult.transcript,
-    });
-    
-    // Save to database
-    await saveEnhancedSummaryRecord(documentId, summarizationResult, {
-      sourceUrl: videoUrl,
-      sourceTitle: extractionResult.title,
-    });
-    
-    console.log('✅ YouTube content processed successfully');
-    return summarizationResult;
-    
-  } catch (error) {
-    console.error('❌ Error processing YouTube content:', error);
-    throw error;
-  }
-}
 
 /**
  * Process and summarize article content

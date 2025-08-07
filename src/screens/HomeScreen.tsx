@@ -15,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { handlePdfUpload } from '../lib/pdfUploadService';
+import DocumentPicker from 'react-native-document-picker';
+import { supabase } from '../lib/supabase';
 
 type RootStackParamList = {
   HomeScreen: undefined;
@@ -229,10 +231,64 @@ const HomeScreen = () => {
 
   const pickAudio = async () => {
     try {
-      Alert.alert('Coming Soon', 'Audio upload feature is coming soon!');
-    } catch (err) {
-      Alert.alert('Error', 'Failed to process audio');
-      console.error(err);
+      // 1. Pick audio file
+      const res = await DocumentPicker.pickSingle({
+        type: [DocumentPicker.types.audio],
+      });
+
+      // 2. Upload to Supabase Storage
+      const file = res;
+
+      // Defensive: file.name and file.type may be null
+      if (!file.name || !file.type) {
+        throw new Error('Invalid file: missing name or type');
+      }
+      const fileExt = file.name.split('.').pop();
+      const fileName = `audio_${Date.now()}.${fileExt}`;
+
+      // Fetch the file as a blob (React Native workaround)
+      const response = await fetch(file.uri);
+      const blob = await response.blob();
+
+      const { data, error } = await supabase
+        .storage
+        .from('audio-uploads')
+        .upload(fileName, blob, {
+          contentType: file.type,
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      // 3. Get public URL
+      const { data: urlData } = supabase
+        .storage
+        .from('audio-uploads')
+        .getPublicUrl(fileName);
+      const publicUrl = urlData?.publicUrl;
+      if (!publicUrl) throw new Error('Failed to get public URL');
+
+      // 4. Invoke your Vercel transcription endpoint
+      const resp = await fetch('https://<your-vercel-domain>/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl: publicUrl }),
+      });
+
+      const { transcript } = await resp.json();
+      if (!transcript) throw new Error('No transcript returned');
+
+      // 5. Navigate to your Summarization screen (pass transcript as fileName for now)
+      navigation.navigate('Summarization', {
+        documentId: '',
+        fileName: 'Audio Transcript',
+        publicUrl: publicUrl,
+        // Optionally, you can pass transcript via context or another param if needed
+      });
+
+    } catch (err: any) {
+      console.error('Audio pick/upload/transcribe error:', err);
+      Alert.alert('Failed to process audio', err.message);
     }
   };
 

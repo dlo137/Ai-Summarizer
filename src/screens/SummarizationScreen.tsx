@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
+import { supabase } from '../lib/supabase';
 import {
   View,
   Text,
@@ -13,16 +15,11 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { WebView } from 'react-native-webview';
 import { saveSummaryRecord, deleteSummaryByDocumentId } from '../lib/summaryService';
 import { updateDocumentStatus } from '../lib/documentService';
 import { Summary } from '../types';
-// Import new content type handlers
-import { processYouTubeContent, processArticleContent } from '../lib/summaryService';
-import { isYouTubeUrl } from '../services/extractors/youtube';
-import { isLikelyArticleUrl } from '../services/extractors/article';
 
 type RootStackParamList = {
   HomeScreen: undefined;
@@ -41,23 +38,48 @@ type SummarizationScreenRouteProp = RouteProp<RootStackParamList, 'Summarization
 type SummarizationScreenNavigationProp = StackNavigationProp<RootStackParamList>;
 
 const SummarizationScreen = () => {
+
   const navigation = useNavigation<SummarizationScreenNavigationProp>();
-  const route = useRoute<SummarizationScreenRouteProp>();
-  
-  const { 
-    documentId, 
-    fileName, 
-    publicUrl, 
+  const route = useRoute();
+  // Support both legacy and audio transcript params
+  const {
+    documentId = '',
+    fileName = '',
+    publicUrl = '',
     summary: existingSummary,
     contentType = 'pdf',
-    sourceUrl 
-  } = route.params;
+    sourceUrl = '',
+    transcript = '',
+  } = (route as any).params || {};
+  // If transcript is present, summarize and optionally save to Supabase
+  useEffect(() => {
+    if (!transcript) return;
+    const summarize = async () => {
+      try {
+        const res = await fetch('https://<your-vercel-domain>/api/summarize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: transcript }),
+        });
+        const { summary: apiSummary } = await res.json();
+        setSummary(apiSummary);
+        // Optionally: save to Supabase
+        await supabase
+          .from('summaries')
+          .insert({ content: apiSummary, original: transcript });
+      } catch (err) {
+        console.error('Failed to summarize transcript:', err);
+      }
+    };
+    summarize();
+  }, [transcript]);
   
   const [summary, setSummary] = useState<string>('');
   const [keyPoints, setKeyPoints] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'Summary' | 'PDF' | 'Video' | 'Article' | 'Chat'>('Summary');
+  type TabType = 'Summary' | 'PDF' | 'Video' | 'Article' | 'Chat';
+  const [activeTab, setActiveTab] = useState<TabType>('Summary');
   const [chatInput, setChatInput] = useState('');
   const [structuredSummary, setStructuredSummary] = useState<{
     overview: string[];
@@ -75,23 +97,21 @@ const SummarizationScreen = () => {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [documentText, setDocumentText] = useState<string>('');
 
-  // Get available tabs based on content type
-  const getAvailableTabs = (): ('Summary' | 'PDF' | 'Video' | 'Article' | 'Chat')[] => {
-    const tabs: ('Summary' | 'PDF' | 'Video' | 'Article' | 'Chat')[] = ['Summary'];
-    
-    if (contentType === 'pdf' && publicUrl) {
-      tabs.push('PDF');
-    } else if (contentType === 'youtube' && sourceUrl) {
-      tabs.push('Video');
-    } else if (contentType === 'article' && sourceUrl) {
-      tabs.push('Article');
-    }
-    
-    tabs.push('Chat');
-    return tabs;
-  };
-
-  const availableTabs = getAvailableTabs();
+  // If transcript is present, show only summary tab
+  const availableTabs = transcript
+    ? ['Summary']
+    : (() => {
+        const tabs: ('Summary' | 'PDF' | 'Video' | 'Article' | 'Chat')[] = ['Summary'];
+        if (contentType === 'pdf' && publicUrl) {
+          tabs.push('PDF');
+        } else if (contentType === 'youtube' && sourceUrl) {
+          tabs.push('Video');
+        } else if (contentType === 'article' && sourceUrl) {
+          tabs.push('Article');
+        }
+        tabs.push('Chat');
+        return tabs;
+      })();
 
   // Helper function to get default chat options based on content type
   const getDefaultChatOptions = (type: 'pdf' | 'youtube' | 'article'): string[] => {
@@ -625,6 +645,16 @@ Please provide a helpful and accurate answer based only on the information in th
   };
 
   const renderSummaryTab = () => {
+    // If transcript is present, show simple summary UI
+    if (transcript) {
+      return (
+        <ScrollView style={{ padding: 16 }}>
+          <Text style={{ fontWeight: 'bold', fontSize: 18 }}>Summary</Text>
+          <Text>{summary || 'Loading…'}</Text>
+        </ScrollView>
+      );
+    }
+    // ...existing code for PDF/legacy summary...
     if (isLoading) {
       return (
         <View style={styles.loadingContainer}>
@@ -633,7 +663,6 @@ Please provide a helpful and accurate answer based only on the information in th
         </View>
       );
     }
-
     if (hasError) {
       return (
         <View style={styles.errorContainer}>
@@ -645,7 +674,6 @@ Please provide a helpful and accurate answer based only on the information in th
         </View>
       );
     }
-
     if (!structuredSummary) {
       return (
         <View style={styles.placeholderContainer}>
@@ -655,7 +683,6 @@ Please provide a helpful and accurate answer based only on the information in th
         </View>
       );
     }
-
     return (
       <View style={styles.summaryTabContainer}>
         <ScrollView style={styles.summaryContent} showsVerticalScrollIndicator={false}>
@@ -691,7 +718,6 @@ Please provide a helpful and accurate answer based only on the information in th
                   </View>
                 ))}
               </View>
-
               {/* Dynamic Sections */}
               {structuredSummary.sections.map((section, sectionIndex) => (
                 <View key={sectionIndex} style={styles.section}>
@@ -707,7 +733,6 @@ Please provide a helpful and accurate answer based only on the information in th
             </>
           )}
         </ScrollView>
-
         {/* Actions Section */}
         {!isEditMode && (
           <View style={styles.actionsContainer}>
@@ -715,12 +740,10 @@ Please provide a helpful and accurate answer based only on the information in th
               <Ionicons name="refresh" size={20} color="#007AFF" />
               <Text style={styles.actionButtonText}>Regenerate</Text>
             </TouchableOpacity>
-            
             <TouchableOpacity style={styles.actionButton} onPress={handleEditSummary}>
               <Ionicons name="create-outline" size={20} color="#007AFF" />
               <Text style={styles.actionButtonText}>Edit</Text>
             </TouchableOpacity>
-            
             <TouchableOpacity style={styles.actionButton} onPress={handleDeleteSummary}>
               <Ionicons name="trash-outline" size={20} color="#FF3B30" />
               <Text style={[styles.actionButtonText, { color: '#FF3B30' }]}>Delete</Text>
@@ -1017,7 +1040,7 @@ Please provide a helpful and accurate answer based only on the information in th
               styles.segmentButton,
               activeTab === tab && styles.activeSegment
             ]}
-            onPress={() => setActiveTab(tab)}
+            onPress={() => setActiveTab(tab as TabType)}
           >
             <Text style={[
               styles.segmentText,
