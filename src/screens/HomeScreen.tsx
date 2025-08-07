@@ -30,6 +30,48 @@ type RootStackParamList = {
 };
 
 const HomeScreen = () => {
+  // Simulate conversion for Audio files (like PDF)
+  const simulateAudioConversion = (documentData: {
+    id: string;
+    fileName: string;
+    publicUrl: string;
+  }) => {
+    setShowPdfModal(true);
+    setPdfProgress(0);
+    progressAnim.setValue(0);
+
+    // Simulate progress over 3 seconds
+    const duration = 3000;
+    const interval = 50;
+    const steps = duration / interval;
+    let currentStep = 0;
+
+    const timer = setInterval(() => {
+      currentStep++;
+      const progress = (currentStep / steps) * 100;
+      setPdfProgress(Math.round(progress));
+      Animated.timing(progressAnim, {
+        toValue: progress,
+        duration: interval,
+        useNativeDriver: false,
+      }).start();
+
+      if (currentStep >= steps) {
+        clearInterval(timer);
+        setTimeout(() => {
+          setShowPdfModal(false);
+          setPdfProgress(0);
+          progressAnim.setValue(0);
+          navigation.navigate('Summarization', {
+            documentId: documentData.id,
+            fileName: documentData.fileName,
+            publicUrl: documentData.publicUrl,
+          });
+          setCurrentDocument(null); // Reset after navigation to prevent stale data
+        }, 500);
+      }
+    }, interval);
+  };
   // Simulate conversion for YouTube videos (reuse PDF logic)
   const simulateYoutubeConversion = (videoData: { title: string; url: string; transcript: string }) => {
     setShowPdfModal(true);
@@ -140,6 +182,7 @@ const HomeScreen = () => {
     publicUrl: string;
   }) => {
     setShowPdfModal(true);
+    setShowPdfModal(true);
     setPdfProgress(0);
     progressAnim.setValue(0);
 
@@ -153,7 +196,6 @@ const HomeScreen = () => {
       currentStep++;
       const progress = (currentStep / steps) * 100;
       setPdfProgress(Math.round(progress));
-      
       Animated.timing(progressAnim, {
         toValue: progress,
         duration: interval,
@@ -166,7 +208,7 @@ const HomeScreen = () => {
           setShowPdfModal(false);
           setPdfProgress(0);
           progressAnim.setValue(0);
-          
+
           // Navigate to Summarization screen if we have document data
           const docToUse = documentData || currentDocument;
           if (docToUse) {
@@ -179,6 +221,7 @@ const HomeScreen = () => {
           } else {
             console.warn('No current document data available for navigation');
           }
+          setCurrentDocument(null); // Reset after navigation to prevent stale data
         }, 500); // Increased delay to ensure modal closes properly
       }
     }, interval);
@@ -231,6 +274,8 @@ const HomeScreen = () => {
 
   const pickAudio = async () => {
     try {
+      // Reset currentDocument before starting a new upload to avoid stale state
+      setCurrentDocument(null);
       // 1. Pick audio file
       const res = await DocumentPicker.getDocumentAsync({
         type: 'audio/*',
@@ -308,23 +353,26 @@ const HomeScreen = () => {
         .update({ content: storageUrl })
         .eq('id', documentId);
 
-      // 7. Invoke your Vercel transcription endpoint (send signed audioUrl and documentId)_
+      // 7. Invoke your Vercel transcription endpoint (send signed audioUrl and documentId)
       const resp = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioUrl: signedUrl, documentId }),
       });
 
-      // No need to store transcript in content column, just keep the file URL (like PDF flow)
-      // const { transcript } = await resp.json();
-      // if (!transcript) throw new Error('No transcript returned');
+      // 8. Invoke your Vercel summarization endpoint (send documentId)
+      // This ensures the summary is generated for this audio file
+      await fetch('https://ai-summarizer-drab-nu.vercel.app/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId }),
+      });
 
-      // 8. Navigate to your Summarization screen
-      navigation.navigate('Summarization', {
-        documentId: documentId,
+      // 9. Simulate audio conversion (show modal/progress bar)
+      simulateAudioConversion({
+        id: documentId,
         fileName: file.name,
         publicUrl: storageUrl,
-        // Optionally, you can pass transcript via context or another param if needed
       });
     } catch (err: any) {
       console.error('Audio pick/upload/transcribe error:', err);
@@ -475,24 +523,24 @@ const HomeScreen = () => {
         </View>
       </Modal>
 
-      {/* PDF Progress Modal */}
+      {/* PDF/Audio Conversion Progress Modal */}
       <Modal
         animationType="fade"
         transparent={true}
         visible={showPdfModal}
-        onRequestClose={() => {}}
+        onRequestClose={() => setShowPdfModal(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.progressHeader}>
-              <Ionicons name="document-text" size={32} color="#007AFF" />
-              <Text style={styles.modalTitle}>Processing PDF</Text>
+              <Text style={styles.modalTitle}>Processing...</Text>
+              <Text style={styles.progressSubtitle}>
+                This may take a few seconds. Please wait while we process your file.
+              </Text>
             </View>
-            <Text style={styles.progressSubtitle}>Converting your document...</Text>
-            
             <View style={styles.progressContainer}>
               <View style={styles.progressBarBackground}>
-                <Animated.View 
+                <Animated.View
                   style={[
                     styles.progressBarFill,
                     {

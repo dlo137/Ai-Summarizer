@@ -46,15 +46,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Clean up temp file
     try { fs.unlinkSync(tmpFile); } catch {}
 
-    // Update Supabase document with transcript
+    // If transcription is empty or whitespace, store empty string
+    const transcriptToStore = (typeof transcription === 'string' && transcription.trim().length > 0)
+      ? transcription
+      : '';
+
+    // Update Supabase document with transcript (or empty string)
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     await supabase
       .from('documents')
-      .update({ content: transcription })
+      .update({ content: transcriptToStore })
       .eq('id', documentId);
 
-    return res.status(200).json({ transcript: transcription });
+    return res.status(200).json({ transcript: transcriptToStore });
   } catch (err: any) {
     console.error('Audio transcription error:', err);
     return res.status(500).json({ error: err.message || 'Internal server error' });
