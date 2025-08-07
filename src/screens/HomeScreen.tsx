@@ -302,7 +302,7 @@ const HomeScreen = () => {
         .eq('id', documentId);
 
       // 7. Invoke your Vercel transcription endpoint (send both audioUrl and documentId)
-      const resp = await fetch('https://<your-vercel-domain>/api/transcribe', {
+      const resp = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioUrl: publicUrl, documentId }),
