@@ -287,35 +287,43 @@ const HomeScreen = () => {
         });
       if (error) throw error;
 
-      // 5. Get public URL
-      const { data: urlData } = supabase
+
+      // 5. Generate a signed URL for the audio file (valid for 1 hour)
+      const { data: signedUrlData, error: signedUrlError } = await supabase
         .storage
         .from('audio')
-        .getPublicUrl(fileName);
-      const publicUrl = urlData?.publicUrl;
-      if (!publicUrl) throw new Error('Failed to get public URL');
+        .createSignedUrl(fileName, 60 * 60); // 1 hour
+      if (signedUrlError || !signedUrlData?.signedUrl) throw new Error('Failed to get signed URL');
+      const signedUrl = signedUrlData.signedUrl;
 
-      // 6. Optionally update the document row with the public URL
+      // 6. Update the document row with the file URL in the 'content' column (for consistency with PDF flow)
+      // Store the storage URL (not the signed URL) in the DB, so the user can always generate a new signed URL for access
+
+      // Use the file path from the upload response to construct the storage URL
+      // You can also hardcode your Supabase project URL here for safety
+      const SUPABASE_PROJECT_URL = 'https://kuomrdnpkeqmfjhqanit.supabase.co'; // <-- replace with your actual project URL if needed
+      const storageUrl = `${SUPABASE_PROJECT_URL}/storage/v1/object/audio/${fileName}`;
       await supabase
         .from('documents')
-        .update({ public_url: publicUrl })
+        .update({ content: storageUrl })
         .eq('id', documentId);
 
-      // 7. Invoke your Vercel transcription endpoint (send both audioUrl and documentId)
+      // 7. Invoke your Vercel transcription endpoint (send signed audioUrl and documentId)
       const resp = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl: publicUrl, documentId }),
+        body: JSON.stringify({ audioUrl: signedUrl, documentId }),
       });
 
-      const { transcript } = await resp.json();
-      if (!transcript) throw new Error('No transcript returned');
+      // No need to store transcript in content column, just keep the file URL (like PDF flow)
+      // const { transcript } = await resp.json();
+      // if (!transcript) throw new Error('No transcript returned');
 
       // 8. Navigate to your Summarization screen
       navigation.navigate('Summarization', {
         documentId: documentId,
         fileName: file.name,
-        publicUrl: publicUrl,
+        publicUrl: storageUrl,
         // Optionally, you can pass transcript via context or another param if needed
       });
     } catch (err: any) {
