@@ -36,14 +36,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Document content URL missing' });
     }
 
-    // The content field should be the public or storage URL
-    const pdfUrl = docData.content;
-    console.log('[extract-pdf-text] PDF URL:', pdfUrl);
+
+    // The content field is the storage URL, extract the path after /object/public/pdfs/
+    const storageUrl = docData.content;
+    console.log('[extract-pdf-text] Storage URL:', storageUrl);
+
+    // Extract the file path relative to the bucket
+    const match = storageUrl.match(/\/object\/public\/pdfs\/(.+)$/);
+    if (!match || !match[1]) {
+      console.error('[extract-pdf-text] Could not extract file path from storage URL:', storageUrl);
+      return res.status(400).json({ error: 'Invalid storage URL format' });
+    }
+    const filePath = match[1];
+    console.log('[extract-pdf-text] File path for signed URL:', filePath);
+
+    // Generate a signed URL (valid for 2 minutes)
+    const { data: signedUrlData, error: signedUrlError } = await supabase
+      .storage
+      .from('pdfs')
+      .createSignedUrl(filePath, 120);
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      console.error('[extract-pdf-text] Failed to create signed URL:', signedUrlError);
+      return res.status(400).json({ error: 'Failed to create signed URL', detail: signedUrlError });
+    }
+    const pdfUrl = signedUrlData.signedUrl;
+    console.log('[extract-pdf-text] Signed PDF URL:', pdfUrl);
 
     // Wait 1.5 seconds to avoid race condition with storage propagation
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // Download the PDF file
+    // Download the PDF file using the signed URL
     const pdfRes = await fetch(pdfUrl);
     if (!pdfRes.ok) {
       console.error('[extract-pdf-text] Failed to download PDF:', pdfRes.status, pdfRes.statusText);
