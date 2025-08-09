@@ -62,8 +62,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pdfUrl = signedUrlData.signedUrl;
     console.log('[extract-pdf-text] Signed PDF URL:', pdfUrl);
 
-    // Wait 1.5 seconds to avoid race condition with storage propagation
-    await new Promise(resolve => setTimeout(resolve, 1500));
+  // Wait 3 seconds to avoid race condition with storage propagation
+  await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Download the PDF file using the signed URL
     const pdfRes = await fetch(pdfUrl);
@@ -72,6 +72,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Failed to download PDF from storage', status: pdfRes.status, statusText: pdfRes.statusText });
     }
     const pdfBuffer = await pdfRes.buffer();
+    console.log('[extract-pdf-text] Downloaded PDF buffer length:', pdfBuffer.length);
+    // Log first 16 bytes as hex for debugging
+    const firstBytes = pdfBuffer.slice(0, 16).toString('hex');
+    console.log('[extract-pdf-text] First 16 bytes of PDF buffer (hex):', firstBytes);
+
+    // Check file size before parsing
+    if (!pdfBuffer || pdfBuffer.length === 0) {
+      console.error('[extract-pdf-text] Downloaded PDF is empty (0 bytes) for document:', documentId);
+      await supabase
+        .from('documents')
+        .update({ transcript: '' })
+        .eq('id', documentId);
+      return res.status(200).json({ transcript: '', message: 'Downloaded PDF is empty.' });
+    }
 
     // Extract text from PDF
     let extractedText = '';
