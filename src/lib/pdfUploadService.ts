@@ -49,6 +49,29 @@ export async function handlePdfUpload() {
     const docRow = await saveDocumentRecord(path, urlData.publicUrl, fileName);
     console.log('✔️ Document queued:', docRow.id);
 
+
+    // 5) Call extract-pdf-text endpoint to extract and save transcript
+    try {
+      await fetch('https://ai-summarizer-drab-nu.vercel.app/api/extract-pdf-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: docRow.id }),
+      });
+    } catch (extractErr) {
+      console.error('Failed to call extract-pdf-text endpoint:', extractErr);
+    }
+
+    // 6) Call summarization endpoint with documentId
+    try {
+      await fetch('https://ai-summarizer-drab-nu.vercel.app/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: docRow.id }),
+      });
+    } catch (summarizeErr) {
+      console.error('Failed to call summarization endpoint:', summarizeErr);
+    }
+
     return {
       docRow,
       publicUrl: urlData.publicUrl,

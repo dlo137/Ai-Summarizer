@@ -17,7 +17,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing document ID' });
     }
 
-    // Fetch the transcript from Supabase
+
+    // Fetch the transcript from Supabase (using the transcript column)
     const { data: transcriptData, error: transcriptError } = await supabase
       .from('documents')
       .select('transcript')

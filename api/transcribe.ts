@@ -79,17 +79,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Clean up temp file
     try { fs.unlinkSync(tmpFile); } catch {}
 
+
     // If transcription is empty or whitespace, store empty string
     const transcriptToStore = (typeof transcription === 'string' && transcription.trim().length > 0)
       ? transcription
       : '';
 
-    // Update Supabase document with transcript (or empty string)
+    // Update Supabase document with transcript (or empty string) in the transcript column
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     await supabase
       .from('documents')
-      .update({ content: transcriptToStore })
+      .update({ transcript: transcriptToStore })
       .eq('id', documentId);
 
     return res.status(200).json({ transcript: transcriptToStore });

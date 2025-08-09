@@ -56,10 +56,10 @@ const SummarizationScreen = () => {
     if (!transcript) return;
     const summarize = async () => {
       try {
-        const res = await fetch('https://<your-vercel-domain>/api/summarize', {
+        const res = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/summarize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: transcript }),
+          body: JSON.stringify({ text: transcript, documentId }),
         });
         const { summary: apiSummary } = await res.json();
         setSummary(apiSummary);
@@ -146,7 +146,7 @@ const SummarizationScreen = () => {
       const res = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, documentId }),
       });
       
       console.log('📥 API Response status:', res.status);
@@ -166,7 +166,10 @@ const SummarizationScreen = () => {
       
       const data = await res.json();
       console.log('✅ API Response received:', data);
-      return data.summary;
+      if (data.summary === null || data.message === 'This file could not be transcribed or summarized.') {
+        return { summary: null, message: data.message || 'This file could not be summarized.' };
+      }
+      return { summary: data.summary };
     } catch (err) {
       console.error('❌ Error summarizing:', err);
       return null;
@@ -207,7 +210,7 @@ Please provide a helpful and accurate answer based only on the information in th
       const res = await fetch('https://ai-summarizer-drab-nu.vercel.app/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: contextualPrompt }),
+        body: JSON.stringify({ text: contextualPrompt, documentId }),
       });
       
       console.log('📥 Chat API Response status:', res.status);
@@ -343,24 +346,29 @@ Please provide a helpful and accurate answer based only on the information in th
         setDocumentText(extractedText);
 
         // Step 2: Summarize the text
-        const summaryResult = await summarizeText(extractedText);
-        
-        if (!summaryResult) {
-          throw new Error('Failed to generate summary. This might be due to:\n- OpenAI API key issues\n- Network connectivity\n- Server configuration\n\nPlease check your Vercel logs for more details.');
+        const summaryResultObj = await summarizeText(extractedText);
+        if (!summaryResultObj || summaryResultObj.summary === null) {
+          setSummary('');
+          setKeyPoints([]);
+          setStructuredSummary(null);
+          setHasError(true);
+          Alert.alert('No Summary Available', summaryResultObj && summaryResultObj.message ? summaryResultObj.message : 'This file could not be summarized.');
+          return;
         }
 
+        const summaryResult = summaryResultObj.summary;
         console.log('✅ Summarization completed');
 
         // Step 3: Extract key points and parse structured summary
         const points = extractKeyPoints(summaryResult);
         const structured = parseStructuredSummary(summaryResult);
-        
+
         // Step 4: Save summary to database
         try {
           console.log('💾 Saving summary to database for document:', documentId);
           await saveSummaryRecord(documentId, summaryResult, points);
           console.log('✅ Summary saved successfully');
-          
+
           // Update document status to 'summarized'
           console.log('📝 Updating document status...');
           await updateDocumentStatus(documentId, 'summarized', summaryResult);
@@ -375,12 +383,12 @@ Please provide a helpful and accurate answer based only on the information in th
           });
           // Don't throw error here - we still want to show the summary even if save fails
         }
-        
+
         // Update state
         setSummary(summaryResult);
         setKeyPoints(points);
         setStructuredSummary(structured);
-        
+
         console.log('✅ Processing completed successfully');
         
       } catch (error) {
@@ -417,10 +425,20 @@ Please provide a helpful and accurate answer based only on the information in th
       
       try {
         const extractedText = await extractTextFromPDF(publicUrl!);
-        const summaryResult = await summarizeText(extractedText);
-        const points = extractKeyPoints(summaryResult || '');
-        const structured = parseStructuredSummary(summaryResult || '');
-        
+        const summaryResultObj = await summarizeText(extractedText);
+        if (!summaryResultObj || summaryResultObj.summary === null) {
+          setSummary('');
+          setKeyPoints([]);
+          setStructuredSummary(null);
+          setHasError(true);
+          Alert.alert('No Summary Available', summaryResultObj && summaryResultObj.message ? summaryResultObj.message : 'This file could not be summarized.');
+          return;
+        }
+
+        const summaryResult = summaryResultObj.summary;
+        const points = extractKeyPoints(summaryResult);
+        const structured = parseStructuredSummary(summaryResult);
+
         // Save summary to database
         if (summaryResult) {
           try {
@@ -431,8 +449,8 @@ Please provide a helpful and accurate answer based only on the information in th
             console.error('⚠️ Failed to save summary on retry:', saveError);
           }
         }
-        
-        setSummary(summaryResult || '');
+
+        setSummary(summaryResult);
         setKeyPoints(points);
         setStructuredSummary(structured);
         
@@ -476,10 +494,21 @@ Please provide a helpful and accurate answer based only on the information in th
             
             try {
               const extractedText = await extractTextFromPDF(publicUrl!);
-              const summaryResult = await summarizeText(extractedText);
-              const points = extractKeyPoints(summaryResult || '');
-              const structured = parseStructuredSummary(summaryResult || '');
-              
+              const summaryResultObj = await summarizeText(extractedText);
+              if (!summaryResultObj || summaryResultObj.summary === null) {
+                setSummary('');
+                setKeyPoints([]);
+                setStructuredSummary(null);
+                setHasError(true);
+                Alert.alert('No Summary Available', summaryResultObj && summaryResultObj.message ? summaryResultObj.message : 'This file could not be summarized.');
+                setIsLoading(false);
+                return;
+              }
+
+              const summaryResult = summaryResultObj.summary;
+              const points = extractKeyPoints(summaryResult);
+              const structured = parseStructuredSummary(summaryResult);
+
               // Update summary in database
               if (summaryResult) {
                 try {
@@ -489,11 +518,11 @@ Please provide a helpful and accurate answer based only on the information in th
                   console.error('Failed to save regenerated summary:', saveError);
                 }
               }
-              
-              setSummary(summaryResult || '');
+
+              setSummary(summaryResult);
               setKeyPoints(points);
               setStructuredSummary(structured);
-              
+
               Alert.alert('Success', 'Summary has been regenerated successfully.');
             } catch (error) {
               console.error('Error regenerating summary:', error);
